@@ -17,7 +17,7 @@ from .config import Profiles
 from .dashboard import Dashboard
 from .demo import create_demo
 from .engine import Engine
-from .hosting import perform_draft, perform_push, remote_fingerprint
+from .hosting import perform_draft, perform_push, remote_fingerprint, remote_preview
 from .jira import JiraConnection, validate_identity
 from .models import OrchestratorError, Profile
 from .setup import diagnostics, wizard
@@ -274,6 +274,7 @@ def review(
     request_changes: str = "",
     verify: bool = False,
     manual_verified: bool = False,
+    full_diff_reviewed: bool = False,
 ) -> None:
     """Inspect review evidence, rerun checks, accept, or request changes."""
     if sum([accept, bool(request_changes), verify]) > 1:
@@ -296,6 +297,10 @@ def review(
                 human_confirm(
                     "Attest that you manually verified this implementation despite missing/failed automated checks?"
                 )
+            if full_diff_reviewed:
+                human_confirm(
+                    "Attest that you inspected all binary/large changes in the worktree outside the abbreviated terminal diff?"
+                )
             human_confirm(
                 f"Accept this exact {key} implementation and create a local branch commit?"
             )
@@ -304,6 +309,7 @@ def review(
                 engine.profile.display_name,
                 manual_verified=manual_verified,
                 expected_fingerprint=package["fingerprint"],
+                full_diff_reviewed=full_diff_reviewed,
             )
 
 
@@ -330,10 +336,8 @@ def push(ctx: typer.Context, key: str) -> None:
     """Approve a specific accepted branch push; remote writes must be enabled."""
     with session(ctx) as engine:
         fingerprint = remote_fingerprint(engine, key, "push")
-        row = engine.store.row(key)
-        console.print(
-            f"Branch {row['branch']} from {row['worktree']}\nApproval fingerprint {fingerprint}"
-        )
+        console.print(json.dumps(remote_preview(engine, key, "push"), indent=2))
+        console.print(f"Approval fingerprint {fingerprint}")
         human_confirm("Push this exact accepted commit to this repository's origin?")
         engine.store.grant(
             engine.store.request("push", key, fingerprint), engine.profile.display_name
@@ -346,7 +350,8 @@ def draft(ctx: typer.Context, key: str, target: str) -> None:
     """Separately approve creation of a draft MR/PR after an exact-commit push."""
     with session(ctx) as engine:
         fingerprint = remote_fingerprint(engine, key, "draft", target)
-        console.print(f"Ticket {key} → target {target}\nFingerprint {fingerprint}")
+        console.print(json.dumps(remote_preview(engine, key, "draft", target), indent=2))
+        console.print(f"Fingerprint {fingerprint}")
         human_confirm("Create the ticket-linked draft merge/pull request?")
         engine.store.grant(
             engine.store.request("draft", key, fingerprint), engine.profile.display_name

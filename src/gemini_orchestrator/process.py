@@ -8,13 +8,16 @@ import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+from typing import IO
 
 from .models import OrchestratorError
 
 
 class Supervisor:
-    def __init__(self) -> None:
+    def __init__(self, max_log_bytes: int = 8 * 1024 * 1024) -> None:
         self.running: dict[str, asyncio.subprocess.Process] = {}
+        self.max_log_bytes = max_log_bytes
+        self._starting: set[str] = set()
 
     async def run(
         self,
@@ -26,65 +29,121 @@ class Supervisor:
         on_start: Callable[[int, str], None] | None = None,
         stdin: str | None = None,
     ) -> dict[str, object]:
-        if key in self.running:
+        if key in self.running or key in self._starting:
             raise OrchestratorError(f"{key} already has a process")
         token = uuid.uuid4().hex
         runner = Path(__file__).with_name("runner.py")
         started = time.monotonic()
         log.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-        # Redirect to disk rather than buffering unbounded worker output in memory.
+        os.fchmod(fd, 0o600)
+        proc: asyncio.subprocess.Process | None = None
+        timed_out = False
+        output_limited = False
+        input_error = ""
+        pump: asyncio.Task[bool] | None = None
         with os.fdopen(fd, "wb") as output:
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable,
-                str(runner),
-                str(os.getpid()),
-                token,
-                *argv,
-                cwd=cwd,
-                stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
-                stdout=output,
-                stderr=output,
-                start_new_session=True,
-            )
-            self.running[key] = proc
-            if on_start:
-                on_start(proc.pid, token)
-            if stdin is not None and proc.stdin:
-                proc.stdin.write(stdin.encode())
-                await proc.stdin.drain()
-                proc.stdin.close()
-            timed_out = False
+            self._starting.add(key)
             try:
-                await asyncio.wait_for(proc.wait(), timeout_seconds)
+                # The deadline covers spawn, prompt delivery and output draining.
+                async with asyncio.timeout(timeout_seconds):
+                    proc = await asyncio.create_subprocess_exec(
+                        sys.executable,
+                        str(runner),
+                        str(os.getpid()),
+                        token,
+                        *argv,
+                        cwd=cwd,
+                        stdin=asyncio.subprocess.PIPE
+                        if stdin is not None
+                        else asyncio.subprocess.DEVNULL,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.STDOUT,
+                        start_new_session=True,
+                    )
+                    self.running[key] = proc
+                    assert proc.stdout is not None
+                    pump = asyncio.create_task(self._capture(key, proc.stdout, output))
+                    if on_start:
+                        on_start(proc.pid, token)
+                    if stdin is not None and proc.stdin:
+                        try:
+                            proc.stdin.write(stdin.encode())
+                            await proc.stdin.drain()
+                            proc.stdin.close()
+                            await proc.stdin.wait_closed()
+                        except (BrokenPipeError, ConnectionResetError) as exc:
+                            input_error = type(exc).__name__
+                            await self.stop(key)
+                    await proc.wait()
+                    output_limited = await asyncio.shield(pump)
             except TimeoutError:
                 timed_out = True
-                await self.stop(key)
-            except asyncio.CancelledError:
-                await self.stop(key)
-                raise
             finally:
+                self._starting.discard(key)
+                # Cleanup also runs on cancellation, callback failure and broken input pipes.
+                if proc is not None:
+                    await self.stop(key)
+                if pump is not None:
+                    if not pump.done():
+                        pump.cancel()
+                    captured = await asyncio.gather(pump, return_exceptions=True)
+                    output_limited = output_limited or captured[0] is True
                 self.running.pop(key, None)
         return {
             "argv": argv,
-            "exit_code": proc.returncode,
+            "exit_code": proc.returncode if proc is not None else None,
             "duration": round(time.monotonic() - started, 3),
             "timeout": timed_out,
+            "output_limited": output_limited,
+            "input_error": input_error,
             "log": str(log),
-            "passed": proc.returncode == 0 and not timed_out,
+            "passed": proc is not None
+            and proc.returncode == 0
+            and not timed_out
+            and not output_limited
+            and not input_error,
         }
+
+    async def _capture(self, key: str, stream: asyncio.StreamReader, output: IO[bytes]) -> bool:
+        size = 0
+        limited = False
+        stopper: asyncio.Task[None] | None = None
+        while chunk := await stream.read(65536):
+            remaining = self.max_log_bytes - size
+            if remaining > 0:
+                output.write(chunk[:remaining])
+                output.flush()
+                size += min(len(chunk), remaining)
+            if len(chunk) > remaining and not limited:
+                limited = True
+                # Continue draining the pipe while termination runs, otherwise a
+                # full StreamReader buffer can prevent subprocess.wait completing.
+                stopper = asyncio.create_task(self.stop(key))
+        if stopper is not None:
+            await stopper
+        return limited
 
     async def stop(self, key: str) -> None:
         proc = self.running.get(key)
-        if proc and proc.returncode is None:
+        if proc is None:
+            return
+        # The guardian can exit before a descendant closes stdout. Its owned process
+        # group must still be terminated; a saved PID from another session is never used.
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), 3)
+        except TimeoutError:
+            pass
+        finally:
             try:
-                os.killpg(proc.pid, signal.SIGTERM)
-                await asyncio.wait_for(proc.wait(), 3)
-            except TimeoutError:
                 os.killpg(proc.pid, signal.SIGKILL)
-                await proc.wait()
             except ProcessLookupError:
                 pass
+            await proc.wait()
 
     async def shutdown(self) -> None:
         await asyncio.gather(*(self.stop(key) for key in list(self.running)))

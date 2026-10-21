@@ -5,6 +5,8 @@ import fcntl
 import json
 import os
 import sys
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -410,13 +412,23 @@ class Engine:
             else:
                 base = self.prerequisite_base(key, plan)
                 path = Path(plan.worktrees[key])
-                await asyncio.to_thread(
-                    Git(self.profile.repository).create,
-                    self.profile,
-                    plan.branches[key],
-                    path,
-                    base,
+                creation = asyncio.create_task(
+                    asyncio.to_thread(
+                        Git(self.profile.repository).create,
+                        self.profile,
+                        plan.branches[key],
+                        path,
+                        base,
+                    )
                 )
+                try:
+                    await asyncio.shield(creation)
+                except asyncio.CancelledError:
+                    # A thread cannot be cancelled. Reconcile its real Git result before
+                    # recording cancellation so no successful worktree is lost from state.
+                    await creation
+                    self.store.patch(key, worktree=str(path), branch=plan.branches[key], base=base)
+                    raise
                 self.store.patch(key, worktree=str(path), branch=plan.branches[key], base=base)
                 git = Git(path)
             self.store.transition(key, State.IN_PROGRESS)
@@ -447,16 +459,35 @@ class Engine:
                         self.runtime,
                         feedback,
                     )
-                log = self.runtime / "logs" / f"{key}-worker-{attempt}.log"
+                log = self.runtime / "logs" / f"{key}-worker-{uuid.uuid4().hex[:12]}-{attempt}.log"
+                started = datetime.now(UTC).isoformat()
+
+                def on_start(
+                    pid: int,
+                    token: str,
+                    log_path: Path = log,
+                    started_at: str = started,
+                    try_number: int = attempt + 1,
+                ) -> None:
+                    self.store.patch(
+                        key,
+                        pid=pid,
+                        process_token=token,
+                        result=json.dumps(
+                            {"log": str(log_path), "started_at": started_at, "attempt": try_number}
+                        ),
+                    )
+
                 result = await self.supervisor.run(
                     key,
                     argv,
                     git.root,
                     self.profile.gemini.timeout,
                     log,
-                    lambda pid, token: self.store.patch(key, pid=pid, process_token=token),
+                    on_start,
                     prompt,
                 )
+                result["started_at"] = started
                 if self.profile.mode == "connected" and result["passed"]:
                     try:
                         output = json.loads(log.read_text())
@@ -481,7 +512,7 @@ class Engine:
             await self.verify(key, approved_launch=True)
         except asyncio.CancelledError:
             row = self.store.row(key)
-            if row["state"] in {State.IN_PROGRESS, State.VERIFYING}:
+            if row["state"] in {State.QUEUED, State.IN_PROGRESS, State.VERIFYING}:
                 self.store.transition(key, self.stop_states.pop(key, State.CANCELLED))
             self.store.patch(key, pid=None)
             raise
@@ -514,6 +545,7 @@ class Engine:
 
     async def verify(self, key: str, *, approved_launch: bool = False) -> dict[str, Any]:
         row = self.store.row(key)
+        checks = [check.model_copy(deep=True) for check in self.profile.checks]
         if not approved_launch:
             self.store.require("verify", key, self.verification_fingerprint(key), consume=True)
         if row["state"] != State.VERIFYING:
@@ -523,13 +555,13 @@ class Engine:
         git = self.validate_worktree(row)
         before = git.fingerprint()
         results = []
-        for index, check in enumerate(self.profile.checks):
+        for index, check in enumerate(checks):
             result = await self.supervisor.run(
                 f"{key}:verify",
                 check.argv,
                 git.root,
                 check.timeout,
-                self.runtime / "logs" / f"{key}-check-{index}.log",
+                self.runtime / "logs" / f"{key}-check-{uuid.uuid4().hex[:12]}-{index}.log",
             )
             result.update({"name": check.name, "required": check.required})
             results.append(result)
@@ -548,7 +580,7 @@ class Engine:
             "results": results,
             "fingerprint": fingerprint,
             "precheck_fingerprint": before,
-            "checks_hash": digest(self.profile.checks),
+            "checks_hash": digest(checks),
         }
         self.store.patch(key, verification=json.dumps(verification))
         self.store.transition(key, State.READY_FOR_REVIEW)
@@ -586,6 +618,7 @@ class Engine:
         *,
         manual_verified: bool = False,
         expected_fingerprint: str | None = None,
+        full_diff_reviewed: bool = False,
     ) -> None:
         row = self.store.row(key)
         if row["state"] != State.READY_FOR_REVIEW:
@@ -619,6 +652,10 @@ class Engine:
                 raise OrchestratorError(
                     "Prerequisite changed or is not accepted; integrate current accepted changes and reverify downstream work"
                 )
+        if git.review(row["base"])["review_warnings"] and not full_diff_reviewed:
+            raise OrchestratorError(
+                "Full diff inspection required for binary/truncated changes; inspect the worktree, then explicitly attest --full-diff-reviewed"
+            )
         # Approval binds both reviewed tree and resulting commit. No Git hook is executed.
         self.store.grant(self.store.request("accept", key, fingerprint), actor)
         self.store.transition(key, State.APPROVED, human=actor, fingerprint=fingerprint)

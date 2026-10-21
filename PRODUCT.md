@@ -20,7 +20,7 @@ Select assigned Jira work, inspect deterministic dependency plans, approve isola
 
 ## Capabilities and Constraints
 
-Human approval governs selection, planning, worker launch, acceptance, pushes and draft requests. Jira is strictly read-only. Demo mode uses synthetic data and real Git worktrees. Company access and publication require explicit approval. No license has been selected.
+Human approval governs selection, planning, worker launch, acceptance, pushes and draft requests. Jira is strictly read-only. Demo mode uses synthetic data and real Git worktrees. Company access and publication require explicit approval. The owner selected the MIT license.
 
 ## Product Principles
 

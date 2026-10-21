@@ -1,0 +1,32 @@
+{
+  "mode": "synthetic demo",
+  "steps": [
+    "Selected four tickets through the explorer; exact selection confirmed",
+    "Inspected plan; plan approval alone did not launch workers",
+    "Independent workers finished in real worktrees; downstream and external blockers held",
+    "Inspected actual review evidence and accepted both prerequisites through separate human gates",
+    "Launched dependent work only after prerequisite acceptance; verified and accepted it",
+    "Requested changes, approved a fresh plan/launch and accepted continuation in the original worktree",
+    "Closed and reopened persisted SQLite state; feedback and accepted implementations survived"
+  ],
+  "blocked_after_first_batch": {
+    "DEMO-3": "BLOCKED",
+    "DEMO-6": "BLOCKED"
+  },
+  "final_states": {
+    "DEMO-1": "APPROVED",
+    "DEMO-2": "APPROVED",
+    "DEMO-3": "APPROVED",
+    "DEMO-4": "NOT_SELECTED",
+    "DEMO-5": "NOT_SELECTED",
+    "DEMO-6": "NOT_SELECTED"
+  },
+  "recorded_approval_grants": 11,
+  "captures": [
+    "01-selection.svg",
+    "02-plan.svg",
+    "03-workers-and-blockers.svg",
+    "04-review.svg",
+    "05-accepted-continuation.svg"
+  ]
+}

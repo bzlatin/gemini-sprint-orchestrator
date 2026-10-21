@@ -4,6 +4,8 @@ import asyncio
 import tempfile
 from pathlib import Path
 
+from capture_utils import sanitize_svg
+
 from gemini_orchestrator.config import Profiles
 from gemini_orchestrator.dashboard import Dashboard
 from gemini_orchestrator.demo import create_demo
@@ -38,6 +40,4 @@ async def capture():
 
 asyncio.run(capture())
 for capture_path in Path("docs").glob("*.svg"):
-    capture_path.write_text(
-        "\n".join(line.rstrip() for line in capture_path.read_text().splitlines()) + "\n"
-    )
+    sanitize_svg(capture_path)

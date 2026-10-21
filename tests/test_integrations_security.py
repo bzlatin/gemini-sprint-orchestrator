@@ -53,19 +53,26 @@ async def test_remote_defaults_off_and_separate_exact_gates(engine: Engine) -> N
     from gemini_orchestrator.git import Git
 
     git = Git(engine.profile.repository)
-    git.run("remote", "add", "origin", "https://example.invalid/synthetic.git")
+    git.run("remote", "add", "origin", "https://example.invalid/synthetic/repo.git")
     fingerprint = remote_fingerprint(engine, "DEMO-1", "push")
     with pytest.raises(OrchestratorError, match="approval"):
         perform_push(engine, "DEMO-1")
     engine.store.grant(engine.store.request("push", "DEMO-1", fingerprint), "Alex")
-    with patch.object(
-        engine,
-        "validate_worktree",
-        return_value=__import__("unittest.mock", fromlist=["MagicMock"]).MagicMock(),
-    ):
-        # Validate the mutation boundary without invoking any network command.
-        with patch("gemini_orchestrator.hosting.remote_fingerprint", return_value=fingerprint):
-            perform_push(engine, "DEMO-1")
+    commands: list[tuple[str, ...]] = []
+    original_run = Git.run
+
+    def intercept_push(self, *args):
+        if "push" in args:
+            commands.append(args)
+            return ""
+        return original_run(self, *args)
+
+    with patch.object(Git, "run", new=intercept_push):
+        perform_push(engine, "DEMO-1")
+    assert commands[0][-2] == "https://example.invalid/synthetic/repo.git"
+    assert commands[0][-1].startswith(
+        json.loads(engine.store.row("DEMO-1")["result"])["accepted_commit"] + ":refs/heads/"
+    )
     with pytest.raises(OrchestratorError, match="draft"):
         perform_draft(engine, "DEMO-1", "main")
     with pytest.raises(OrchestratorError):
@@ -269,3 +276,85 @@ else:
     assert (
         Path(row["worktree"]) / "implementation.txt"
     ).read_text() == "Synthetic CLI implementation"
+
+
+@pytest.mark.parametrize(
+    "remote",
+    [
+        "https://user:secret@example.invalid/owner/repo.git",  # pragma: allowlist secret -- synthetic invalid credential fixture
+        "file:///tmp/repo",
+        "ext::danger",
+        "https://example.invalid/owner/repo?token=secret",
+        "https://example.invalid/owner/repo#fragment",
+    ],
+)
+def test_remote_rejects_embedded_credentials_and_unsafe_transports(remote: str) -> None:
+    from gemini_orchestrator.hosting import repository_slug
+
+    with pytest.raises(OrchestratorError):
+        repository_slug(remote)
+
+
+@pytest.mark.parametrize(
+    "remote,expected",
+    [
+        ("https://github.com/user/repo.git", "github.com/user/repo"),
+        ("git@gitlab.example:group/repo.git", "gitlab.example/group/repo"),
+        ("ssh://git@gitlab.example/group/subgroup/repo.git", "gitlab.example/group/subgroup/repo"),
+    ],
+)
+def test_explicit_hosting_target(remote: str, expected: str) -> None:
+    from gemini_orchestrator.hosting import repository_slug
+
+    assert repository_slug(remote) == expected
+
+
+async def test_push_keeps_approved_sha_when_head_changes_after_gate(engine: Engine) -> None:
+    from gemini_orchestrator.git import Git
+    from gemini_orchestrator.hosting import remote_preview
+    from gemini_orchestrator.models import digest
+
+    await accepted(engine)
+    engine.profile.hosting, engine.profile.remote_writes = "github", True
+    Git(engine.profile.repository).run(
+        "remote", "add", "origin", "https://example.invalid/synthetic/repo.git"
+    )
+    preview = remote_preview(engine, "DEMO-1", "push")
+    engine.store.grant(engine.store.request("push", "DEMO-1", digest(preview)), "Alex")
+    git = Git(Path(engine.store.row("DEMO-1")["worktree"]))
+    (git.root / "unreviewed.txt").write_text("change after preview")
+    new_head = git.checkpoint("DEMO-1")
+    assert new_head != preview["commit"]
+    original_run = Git.run
+    pushes = []
+
+    def intercept(self, *args):
+        if "push" in args:
+            pushes.append(args)
+            return ""
+        return original_run(self, *args)
+
+    with (
+        patch("gemini_orchestrator.hosting.remote_preview", return_value=preview),
+        patch.object(Git, "run", new=intercept),
+    ):
+        perform_push(engine, "DEMO-1")
+    assert pushes[0][-1] == f"{preview['commit']}:refs/heads/{preview['branch']}"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("adapter", "unknown"),
+        # Known-invalid synthetic credential fixture.
+        ("base_url", "https://user:secret@example.invalid"),  # pragma: allowlist secret
+        ("base_url", "http://example.invalid"),
+    ],
+)
+def test_configuration_rejects_unsafe_jira_settings(field: str, value: str) -> None:
+    from pydantic import ValidationError
+
+    from gemini_orchestrator.models import JiraSettings
+
+    with pytest.raises(ValidationError):
+        JiraSettings.model_validate({field: value})

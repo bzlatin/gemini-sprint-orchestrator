@@ -5,7 +5,7 @@ import json
 import re
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -137,7 +137,7 @@ class Check(BaseModel):
 
 
 class JiraSettings(BaseModel):
-    adapter: str = "mcp"
+    adapter: Literal["mcp", "rest"] = "mcp"
     server: str = ""
     settings_path: Path = Path.home() / ".gemini/settings.json"
     base_url: str = ""
@@ -146,6 +146,24 @@ class JiraSettings(BaseModel):
     cloud_id: str = ""
     include_completed: bool = False
     acceptance_field: str = ""
+
+    @field_validator("base_url")
+    @classmethod
+    def safe_url(cls, value: str) -> str:
+        from urllib.parse import urlparse
+
+        if value:
+            parsed = urlparse(value)
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("Jira URL must be HTTPS without credentials, query or fragment")
+        return value
 
 
 class GeminiSettings(BaseModel):
@@ -170,7 +188,7 @@ class Profile(BaseModel):
     boards: list[Resource] = Field(default_factory=list)
     board_id: str = ""
     sprint: Resource | None = None
-    sprint_behavior: str = "active"
+    sprint_behavior: Literal["active", "manual"] = "active"
     repository: Path
     worktrees: Path
     jira: JiraSettings = Field(default_factory=JiraSettings)

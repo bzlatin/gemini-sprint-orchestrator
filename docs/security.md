@@ -4,7 +4,7 @@
 
 The coordinator runs locally as the developer. It is not a multi-user service, an authentication proxy or a general hostile-code sandbox. Keep enterprise configuration and runtime data on the approved enterprise machine. Demo uses only generated data and never instantiates enterprise adapters.
 
-Connected data access requires `--enable-connected` or an explicit setup confirmation. Remote writes are disabled by default and have separate push/draft approvals. Jira mutation operations do not exist. No automatic merge, deployment or destructive cleanup is provided. Selecting a license and publishing this source are separate owner decisions.
+Connected data access requires `--enable-connected` or an explicit setup confirmation. Remote writes are disabled by default and have separate push/draft approvals. Jira mutation operations do not exist. No automatic merge, deployment or destructive cleanup is provided. The owner selected MIT. Changing repository visibility or publishing releases remains a separate owner decision.
 
 Approvals bind exact action, ticket identities, plan ID, configuration hash, base commit and relevant implementation fingerprints. Launch approval is one-use and includes current worktree evidence. Changed plans invalidate grants. Acceptance fingerprints content after verification, including untracked content and symlink targets, and requires an explicit human actor. Missing/failed checks require a separate manual attestation. Agents have no approval interface.
 
@@ -28,4 +28,4 @@ Configuration, SQLite, logs, review packages, worktree paths and TASK_BOARD.md m
 
 Atomic writes prevent partial dashboards/configuration. WAL-backed transactions preserve transitions. Advisory locks prevent duplicate supervision. Guardian processes terminate child groups when the parent disappears. Recovery never assumes a saved PID still belongs to a live worker and never kills an unrelated process from a stale PID.
 
-There is no telemetry service. External traffic is limited to explicitly enabled integrations/model execution, installation and owner-approved publication. Logs are local and currently have no automatic size/retention rotation; operators must monitor disk space and apply their retention policy after stopping processes.
+There is no telemetry service. External traffic is limited to explicitly enabled integrations/model execution, installation and owner-approved publication. Process logs are local and capped at 8 MiB each; there is no automatic historical retention/rotation; operators must monitor disk space and apply their retention policy after stopping processes.

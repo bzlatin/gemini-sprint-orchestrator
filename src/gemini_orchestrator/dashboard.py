@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from rich.text import Text
@@ -359,9 +361,26 @@ class Dashboard(App[None]):
         key = self.query_one("#review-key", Input).value.strip().upper()
         package = self.engine.review(key)
         self.loaded_review = (key, package["fingerprint"])
-        self.query_one("#review-text", Static).update(
-            json.dumps(package, indent=2, ensure_ascii=False)
+        ticket = package["ticket"]
+        verification = package["verification"]
+        checks = "\n".join(
+            f"  {item['name']}: {'PASS' if item['passed'] else 'FAIL'} · exit {item['exit_code']} · {item['duration']}s\n    {item['argv']}\n    Log: {item['log']}"
+            for item in verification.get("results", [])
         )
+        rendered = (
+            f"{key} · {ticket['summary']}\nBranch: {package['branch']}\nWorktree: {package['worktree']}\nVerification: {verification.get('status', 'manual required')}\n{checks}\n\nFiles changed (including new files):\n{package['files'] or 'No changes'}\n\nImplementation diff:\n{package['diff'] or 'No diff'}\n\nAcceptance criteria:\n"
+            + "\n".join(f"- {criterion}" for criterion in ticket["acceptance"])
+        )
+        rendered += "\n\nWorker summary:\n" + package["worker"].get(
+            "summary", "Synthetic worker completed; inspect its actual diff above."
+        )
+        rendered += "\n\nReview warnings:\n" + (
+            "\n".join(package.get("review_warnings", [])) or "None"
+        )
+        rendered += "\n\nKnown risks:\n" + "\n".join(package["risks"])
+        rendered += "\n\nFeedback history:\n" + ("\n".join(package["feedback"]) or "None")
+        rendered += f"\n\nLoaded review fingerprint: {package['fingerprint']}"
+        self.query_one("#review-text", Static).update(rendered)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button = event.button.id
@@ -472,8 +491,10 @@ class Dashboard(App[None]):
                 raw = json.loads(self.query_one("#settings-json", TextArea).text)
 
                 def save() -> None:
-                    if self.engine.executing:
-                        raise OrchestratorError("Wait for workers before editing settings")
+                    if self.engine.executing or self.engine.supervisor.running:
+                        raise OrchestratorError(
+                            "Wait for workers and verification before editing settings"
+                        )
                     profile = self.engine.profile.model_copy(deep=True)
                     profile.gemini = type(profile.gemini).model_validate(
                         {
@@ -501,7 +522,8 @@ class Dashboard(App[None]):
         store = self.engine.store
         rows = store.rows()
         signature = json.dumps([rows, store.approvals(), store.events(30)], default=str)
-        if signature == self.last_view and not force:
+        active = any(row["state"] in {State.IN_PROGRESS, State.VERIFYING} for row in rows)
+        if signature == self.last_view and not force and not active:
             return
         self.last_view = signature
         p = self.engine.profile
@@ -514,14 +536,33 @@ class Dashboard(App[None]):
         agents = []
         for row in rows:
             if row["worktree"] or row["state"] != State.NOT_SELECTED:
-                log = self.engine.runtime / "logs" / f"{row['key']}-worker-0.log"
+                worker = json.loads(row["result"] or "{}")
+                log = Path(worker["log"]) if worker.get("log") else None
                 recent = ""
-                if log.exists():
+                elapsed = ""
+                if row["state"] in {State.IN_PROGRESS, State.VERIFYING} and worker.get(
+                    "started_at"
+                ):
+                    seconds = max(
+                        0,
+                        int(
+                            (
+                                datetime.now(UTC) - datetime.fromisoformat(worker["started_at"])
+                            ).total_seconds()
+                        ),
+                    )
+                    elapsed = f" · elapsed {seconds}s"
+                if (
+                    log is not None
+                    and log.is_file()
+                    and not log.is_symlink()
+                    and log.parent.resolve() == (self.engine.runtime / "logs").resolve()
+                ):
                     with log.open("rb") as stream:
                         stream.seek(max(0, log.stat().st_size - 1500))
                         recent = stream.read().decode(errors="replace")
                 agents.append(
-                    f"{row['key']} · {row['state']} · PID {row['pid'] or '—'}\nBranch {row['branch'] or 'pending'}\nWorktree {row['worktree'] or 'pending'}\n{recent}"
+                    f"{row['key']} · {row['state']} · PID {row['pid'] or '—'}{elapsed}\nBranch {row['branch'] or 'pending'}\nWorktree {row['worktree'] or 'pending'}\n{recent}"
                 )
         self.query_one("#agent-text", Static).update(
             "\n\n".join(agents) or "No workers launched. Select work and approve a plan first."
@@ -539,6 +580,11 @@ class Dashboard(App[None]):
                 for event in store.events(100)
             )
         )
+        if self.current_key:
+            ticket = store.ticket(self.current_key)
+            self.query_one("#details", Static).update(
+                f"{ticket.key} · {ticket.summary} · {store.row(ticket.key)['state']}\n{ticket.description}\nAcceptance: {'; '.join(ticket.acceptance)}\nBlockers: {', '.join(ticket.dependencies) or 'none'}"
+            )
         # Update lifecycle cells without moving the user's cursor or resetting filters.
         table = self.query_one("#tickets", DataTable)
         for row in rows:

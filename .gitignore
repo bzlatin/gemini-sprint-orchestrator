@@ -22,3 +22,5 @@ worktrees/
 profiles/
 .DS_Store
 .impeccable/
+test-results.xml
+.pytest_tmp/

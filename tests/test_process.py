@@ -90,3 +90,55 @@ asyncio.run(main())
                 os.killpg(int(guardian_pid_file.read_text()), signal.SIGTERM)
             except ProcessLookupError:
                 pass
+
+
+async def test_timeout_covers_a_child_that_never_reads_prompt(tmp_path: Path) -> None:
+    supervisor = Supervisor()
+    result = await supervisor.run(
+        "blocked-input",
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        tmp_path,
+        0.25,
+        tmp_path / "blocked-input.log",
+        stdin="x" * (4 * 1024 * 1024),
+    )
+    assert result["timeout"]
+    assert not result["passed"]
+    assert result["duration"] < 5
+    assert not supervisor.running
+
+
+async def test_callback_failure_stops_the_owned_child(tmp_path: Path) -> None:
+    import pytest
+
+    supervisor = Supervisor()
+
+    def fail(*_):
+        raise RuntimeError("callback failed")
+
+    with pytest.raises(RuntimeError, match="callback failed"):
+        await supervisor.run(
+            "callback",
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            tmp_path,
+            5,
+            tmp_path / "callback.log",
+            on_start=fail,
+        )
+    assert not supervisor.running
+
+
+async def test_excessive_output_is_bounded_and_fails(tmp_path: Path) -> None:
+    supervisor = Supervisor(max_log_bytes=4096)
+    log = tmp_path / "noisy.log"
+    result = await supervisor.run(
+        "noisy",
+        [sys.executable, "-c", "import sys; sys.stdout.write('x'*1000000); sys.stdout.flush()"],
+        tmp_path,
+        10,
+        log,
+    )
+    assert result["output_limited"]
+    assert not result["passed"]
+    assert log.stat().st_size == 4096
+    assert not supervisor.running

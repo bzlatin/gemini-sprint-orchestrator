@@ -179,3 +179,36 @@ async def test_dashboard_search_and_full_execution(engine: Engine, profiles: Pro
         assert not isinstance(app.screen, Confirmation)
         assert "Load and inspect" in str(app.query_one("#notice", Static).render())
         await app.action_quit()
+
+
+async def test_live_logs_refresh_without_a_lifecycle_change(
+    engine: Engine, profiles: Profiles
+) -> None:
+    import asyncio
+    import sys
+
+    await engine.discover()
+    original_run = engine.supervisor.run
+
+    async def observed_worker(key, argv, *args, **kwargs):
+        if key == "DEMO-1":
+            script = "import time; print('phase one',flush=True); time.sleep(1); print('phase two',flush=True); time.sleep(2)"
+            argv = [sys.executable, "-u", "-c", script]
+        return await original_run(key, argv, *args, **kwargs)
+
+    app = Dashboard(engine, profiles)
+    with patch.object(engine.supervisor, "run", side_effect=observed_worker):
+        async with app.run_test(size=(120, 40)) as pilot:
+            engine.select(["DEMO-1"], "Alex")
+            app.action_plan()
+            engine.approve_plan("Alex")
+            await pilot.pause()
+            app.query_one("#launch", Button).press()
+            await pilot.pause()
+            await pilot.click("#confirm")
+            async with asyncio.timeout(10):
+                while "phase two" not in str(app.query_one("#agent-text", Static).render()):
+                    await pilot.pause(0.1)
+            assert engine.store.row("DEMO-1")["state"] == State.IN_PROGRESS
+            assert "elapsed" in str(app.query_one("#agent-text", Static).render())
+            await app.action_quit()

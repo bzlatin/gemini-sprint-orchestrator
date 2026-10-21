@@ -101,9 +101,8 @@ async def configure_connected_resources(profile: Profile, jira: Jira) -> None:
         profile.sprint.board_id = chosen.id
         if not Confirm.ask("Refresh sprint discovery?", default=False):
             break
-    profile.sprint_behavior = Prompt.ask(
-        "Sprint behavior", choices=["active", "manual"], default="active"
-    )
+    sprint_choice = Prompt.ask("Sprint behavior", choices=["active", "manual"], default="active")
+    profile.sprint_behavior = "manual" if sprint_choice == "manual" else "active"
 
 
 def tooling(repository: Path) -> list[str]:
@@ -208,7 +207,7 @@ def wizard(
     )
     adapter = Prompt.ask("Jira connection", choices=["mcp", "rest", "later"], default="later")
     if adapter != "later":
-        profile.jira.adapter = adapter
+        profile.jira.adapter = "rest" if adapter == "rest" else "mcp"
         if adapter == "mcp":
             console.print(
                 "MCP connectivity can contact configured services. Use this only in an approved environment."

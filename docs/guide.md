@@ -74,3 +74,5 @@ gemini-orchestrator plan --approve
 This edits local planning metadata only; Jira is unchanged. It returns the previous queued plan to selection and revokes all previous plan/launch grants while retaining their audit records. Repeated discovery may replace manual context with current Jira data, so review the next plan.
 
 Manual verification reruns have their own durable approval, bound to the exact command list and current implementation. Changing checks or files invalidates that grant. In the dashboard, acceptance is bound to the loaded review key and fingerprint; changing the input key or implementation requires a new loaded review.
+
+Review includes new, untracked source files in the patch. Binary or diffs larger than 1 MB require inspecting the complete worktree changes outside the abbreviated terminal view, then `review KEY --accept --full-diff-reviewed` with a separate explicit attestation. Worker and verification logs retain unique paths across reruns and each process log is capped at 8 MiB.

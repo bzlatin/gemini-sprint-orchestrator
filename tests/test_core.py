@@ -192,7 +192,7 @@ async def test_full_demo_lifecycle_review_feedback_and_continuation(engine: Engi
     engine.approve_launch("Alex")
     await engine.execute()
     for key in ("DEMO-1", "DEMO-2"):
-        assert engine.store.row(key)["state"] == State.READY_FOR_REVIEW
+        assert engine.store.row(key)["state"] == State.READY_FOR_REVIEW, engine.store.events(30)
         package = engine.review(key)
         assert package["verification"]["status"] == "passed"
         assert package["worktree"] != str(engine.profile.repository)
@@ -372,3 +372,118 @@ async def test_accept_rejects_changed_loaded_review(engine: Engine) -> None:
     await engine.verify("DEMO-1")
     with pytest.raises(OrchestratorError, match="Review preview changed"):
         engine.accept("DEMO-1", "Alex", expected_fingerprint=fingerprint)
+
+
+def test_git_metadata_mutations_are_serialized_across_processes(
+    engine: Engine, tmp_path: Path
+) -> None:
+    import concurrent.futures
+    import subprocess
+    import sys
+
+    profile_json = engine.profile.model_dump_json()
+    base = Git(engine.profile.repository).validate()["head"]
+
+    def create_one(index: int) -> subprocess.CompletedProcess[str]:
+        script = (
+            "from gemini_orchestrator.models import Profile; from gemini_orchestrator.git import Git; from pathlib import Path; p=Profile.model_validate_json("
+            + repr(profile_json)
+            + "); Git(p.repository).create(p,"
+            + repr(f"gso/concurrent-{index}")
+            + ", p.worktrees/"
+            + repr(f"concurrent-{index}")
+            + ","
+            + repr(base)
+            + ")"
+        )
+        return subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=30
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        results = list(executor.map(create_one, range(6)))
+    assert all(result.returncode == 0 for result in results), [r.stderr for r in results]
+    assert (
+        len(
+            Git(engine.profile.repository).run("worktree", "list", "--porcelain").split("worktree ")
+        )
+        == 8
+    )
+
+
+async def test_review_includes_untracked_implementation_content(engine: Engine) -> None:
+    await engine.discover()
+    engine.select(["DEMO-1"], "Alex")
+    engine.propose()
+    engine.approve_plan("Alex")
+    engine.approve_launch("Alex")
+    await engine.execute()
+    package = engine.review("DEMO-1")
+    assert "src/help.py" in package["files"]
+    assert "+def example()" in package["diff"]
+    assert not package["review_warnings"]
+
+
+async def test_reruns_preserve_previous_logs(engine: Engine) -> None:
+    await engine.discover()
+    engine.select(["DEMO-1"], "Alex")
+    engine.propose()
+    engine.approve_plan("Alex")
+    engine.approve_launch("Alex")
+    await engine.execute()
+    original = Path(json.loads(engine.store.row("DEMO-1")["result"])["log"])
+    content = await asyncio.to_thread(original.read_text)
+    engine.feedback("DEMO-1", "Make a clearer example", "Alex")
+    engine.select(["DEMO-1"], "Alex")
+    engine.propose()
+    engine.approve_plan("Alex")
+    engine.approve_launch("Alex")
+    await engine.execute()
+    current = Path(json.loads(engine.store.row("DEMO-1")["result"])["log"])
+    assert current != original
+    assert await asyncio.to_thread(original.read_text) == content
+
+
+async def test_checks_changed_during_verification_cannot_be_claimed_passed(engine: Engine) -> None:
+    from unittest.mock import patch
+
+    from gemini_orchestrator.models import digest
+
+    await engine.discover()
+    engine.select(["DEMO-1"], "Alex")
+    engine.propose()
+    engine.approve_plan("Alex")
+    engine.approve_launch("Alex")
+    await engine.execute()
+    old_hash = digest(engine.profile.checks)
+    engine.approve_verification("DEMO-1", "Alex")
+    original_run = engine.supervisor.run
+
+    async def change_configuration(*args, **kwargs):
+        result = await original_run(*args, **kwargs)
+        engine.profile.checks = [Check(name="Unexecuted changed command", argv=["false"])]
+        return result
+
+    with patch.object(engine.supervisor, "run", side_effect=change_configuration):
+        result = await engine.verify("DEMO-1")
+    assert result["checks_hash"] == old_hash
+    assert result["checks_hash"] != digest(engine.profile.checks)
+    with pytest.raises(OrchestratorError, match="settings changed"):
+        engine.accept("DEMO-1", "Alex")
+
+
+async def test_binary_changes_require_explicit_full_review_attestation(engine: Engine) -> None:
+    await engine.discover()
+    engine.select(["DEMO-1"], "Alex")
+    engine.propose()
+    engine.approve_plan("Alex")
+    engine.approve_launch("Alex")
+    await engine.execute()
+    worktree = Path(engine.store.row("DEMO-1")["worktree"])
+    (worktree / "asset.bin").write_bytes(b"\x00binary asset")
+    engine.approve_verification("DEMO-1", "Alex")
+    await engine.verify("DEMO-1")
+    assert engine.review("DEMO-1")["review_warnings"]
+    with pytest.raises(OrchestratorError, match="Full diff inspection"):
+        engine.accept("DEMO-1", "Alex")
+    engine.accept("DEMO-1", "Alex", full_diff_reviewed=True)

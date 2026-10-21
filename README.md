@@ -1,41 +1,49 @@
 # Gemini Sprint Orchestrator
 
-A local, human-controlled sprint control center for Gemini CLI. Select assigned Jira tickets, inspect dependency plans, run isolated workers, verify changes and review them before any optional remote publication.
+A local, human-controlled sprint control center for Gemini CLI. Select assigned Jira tickets, inspect dependency plans, run isolated workers, verify changes and review them before optional remote publication.
 
-**Status:** local implementation with an offline demo and mocked integration coverage. Real Gemini/Jira/hosting compatibility must be validated on the approved target system. Source is published in the owner-approved [private GitHub repository](https://github.com/bzlatin/gemini-sprint-orchestrator). No software license has been selected.
+**Version 0.1.1 is an MIT-licensed public alpha candidate.** The offline demo is the supported starting point. Connected Gemini/Jira/hosting configurations require validation on the approved target system; this is not an enterprise security certification. See [release readiness](docs/release-readiness.md) and [known limitations](docs/limitations.md).
 
-## Install
+![Synthetic ticket explorer](docs/demo/01-selection.png)
 
-Python 3.11+ and Git are required on macOS or Linux.
+## Install and try the offline demo
+
+Python 3.11+ and Git are required on macOS or Linux. From this source checkout:
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[dev]'
+python -m pip install -c requirements.lock -e .
 gemini-orchestrator demo
 ```
 
-The demo needs no Gemini, Jira, company credentials or network. It creates synthetic tickets and a sample repository under `~/.local/share/gemini-orchestrator/runtime/demo/`. `GSO_HOME` or `--home` selects another private local root. Demo does not change your active connected profile.
-
-## Demo workflow
+The demo needs no Gemini, Jira, company credentials or network. It creates synthetic tickets and a sample repository under `~/.local/share/gemini-orchestrator/runtime/demo/`. `GSO_HOME` or the global `--home` option selects another private local root. Demo does not change your active connected profile.
 
 1. Select tickets with Space; choose **Save selection** and confirm.
 2. Choose **Propose plan**, inspect dependencies/branches/checks, then **Approve plan**.
-3. Choose **Approve launch** and confirm. Independent mock processes run concurrently in real worktrees.
-4. Inspect review evidence in **Review**, then accept or request changes. Acceptance creates a local commit on the worker branch.
-5. Approve another launch to continue dependencies after prerequisite review. DEMO-6 remains blocked by an unavailable external prerequisite.
+3. Separately choose **Approve launch**. Independent mock processes run concurrently in real worktrees.
+4. Load a ticket in **Review**. Inspect actual file changes, including new files, verification and diff; accept or request changes. Acceptance creates a local worker-branch commit.
+5. Approve another launch for dependent work after prerequisite acceptance. DEMO-6 stays blocked while its unavailable prerequisite is selected for planning.
+
+The maintainer's [recorded walkthrough](docs/demo/README.md) exercised this lifecycle, change requests, continuation and restart recovery through the real Textual controls. To reproduce it in a new disposable directory:
+
+```sh
+python -m pip install -c requirements-dev.lock -e '.[dev]'
+python scripts/demo_walkthrough.py --output /tmp/my-synthetic-sprint-demo
+```
 
 ## Connected setup
+
+On an approved work system:
 
 ```sh
 gemini-orchestrator setup
 gemini-orchestrator doctor
-# Only on an approved work system, after reviewing configuration:
 gemini-orchestrator jira test --enable-connected
 gemini-orchestrator start --enable-connected
 ```
 
-Setup can save local settings without connecting to Jira. It detects Gemini capabilities, confirms the authenticated immutable identity, distinguishes team/project/board, discovers active sprints when supported, validates Git read-only, configures worker limits and verification, and keeps remote writes off.
+Setup can save local settings without connecting to Jira. It detects Gemini capabilities, confirms the authenticated immutable identity, distinguishes team/project/board, discovers active sprints when supported, validates Git without changing the checkout, configures limits/checks, and keeps remote writes off. Do not transfer enterprise runtime data to this generic source repository or a personal machine.
 
 ## CLI workflow
 
@@ -47,30 +55,29 @@ gemini-orchestrator profile create
 gemini-orchestrator profile switch personal
 gemini-orchestrator profile edit
 gemini-orchestrator tickets --refresh --enable-connected
-gemini-orchestrator select DEMO-1 DEMO-2
+gemini-orchestrator select APP-1 APP-2
 gemini-orchestrator plan --approve
-gemini-orchestrator run                         # demo profile
-# connected run also requires --enable-connected
-gemini-orchestrator review DEMO-1
-gemini-orchestrator review DEMO-1 --accept
+gemini-orchestrator run --enable-connected
+gemini-orchestrator review APP-1
+gemini-orchestrator review APP-1 --accept
 gemini-orchestrator status
 gemini-orchestrator board
-gemini-orchestrator approvals
-gemini-orchestrator test
 ```
 
-For a demo CLI workflow, create it with `demo --headless`, then use `--profile demo` on each command. Every consequential action still asks for explicit human confirmation. Use `retry KEY` after feedback or interruption to propose continuation in the same worktree.
+For a demo CLI workflow, use `demo --headless`, then `--profile demo` on each command; omit `--enable-connected`. Every consequential action still asks for explicit confirmation. Use `retry KEY` after feedback/interruption to propose continuation in the same worktree. Remote pushes and draft requests are disabled by default and each have a separate exact-commit/destination approval.
 
-## Development
+## Development and validation
 
 ```sh
+python -m pip install -c requirements-dev.lock -e '.[dev]'
 python -m pytest
 ruff check .
 ruff format --check .
 mypy src/gemini_orchestrator
 python -m build --no-isolation
+gemini-orchestrator test
 ```
 
-See [architecture](docs/architecture.md), [user guide](docs/guide.md), [security](docs/security.md), [integration compatibility](docs/integrations.md), [enterprise deployment](docs/enterprise.md), and [limitations](docs/limitations.md). No Jira mutation, automatic merge, deployment, telemetry or automatic worktree deletion is implemented.
+Runtime and development constraints record tested versions. [Security policy](SECURITY.md), [dependency inventory](docs/security/runtime-sbom.json), [validation evidence](docs/validation.md), and [changelog](CHANGELOG.md) describe the release scope. The project adds no telemetry, Jira mutations, automatic merges/deployments, or automatic worktree deletion. Gemini and configured external tools retain their own approved settings and policies.
 
-Native terminal captures from synthetic data: [wide dashboard](docs/dashboard-120.svg), [compact dashboard](docs/dashboard-80.svg), [execution plan](docs/planner-120.svg). Reproduce them with `python scripts/capture_dashboard.py`.
+See [architecture](docs/architecture.md), [user guide](docs/guide.md), [integration compatibility](docs/integrations.md), and [enterprise deployment](docs/enterprise.md).

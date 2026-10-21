@@ -40,7 +40,9 @@ This document records the implemented system in `src/gemini_orchestrator/dashboa
 - Scrollable evidence and compact geometry that preserve access to actions.
 - Flat, dark work areas divided by terminal borders and tonal surfaces.
 
-Evidence consists of source inspection and native Rich/Textual SVG captures: `docs/dashboard-120.svg`, `docs/dashboard-80.svg`, `docs/planner-120.svg`, and `docs/planner-80.svg`. These document synthetic ticket and plan states at 120×40 and 80×24 cells. Their SVG text and geometry provide evidence; no raster review, live terminal visual inspection, screen-reader validation or enterprise integration validation is claimed here. Capture-export font settings are not application typography tokens.
+Current walkthrough evidence consists of five native Rich/Textual SVG captures and locally rendered PNGs in `docs/demo/`: `01-selection`, `02-plan`, `03-workers-and-blockers`, `04-review`, and `05-accepted-continuation`. These 120×40 synthetic states were raster-inspected in the finish review. `docs/demo/report.json` records the actual scripted application interactions, real local worktree execution, separate approvals, prerequisite acceptance, continuation and persistence checks. The walkthrough does not contact Jira, invoke a model account or publish remotely.
+
+Earlier native captures `docs/dashboard-120.svg`, `docs/dashboard-80.svg`, `docs/planner-120.svg`, and `docs/planner-80.svg` retain ticket/plan geometry evidence at 120×40 and 80×24. The compact-size application test covers selection markers, focusable details, table height and separate plan approval without worker launch; it is not raster evidence for the full current workflow at 80×24. Source and behavioral tests establish dynamic approval/refresh behavior beyond a still capture. Full SSH/tmux operation, screen-reader behavior and enterprise integration remain target-system validation work. Capture-export font settings are not application typography tokens.
 
 ## Colors
 
@@ -66,9 +68,9 @@ The palette is cool and restrained, with a mint accent for identity and input fo
 
 ## Typography
 
-The application uses the terminal's monospaced font and cell metrics. It does not select a font family, point size, letter spacing or browser type scale. The `monospace` frontmatter value describes that terminal constraint. Rich's exported SVG uses Fira Code at 20px for its capture presentation; that is an export setting, not a runtime requirement.
+The application uses the terminal's monospaced font and cell metrics. It does not select a font family, point size, letter spacing or browser type scale. The `monospace` frontmatter value describes that terminal constraint. The native SVG evidence uses `Menlo, Consolas, monospace` at 20px with a 24.4px line height for capture presentation; external web-font declarations are removed and no network font is required. These export settings are not runtime requirements.
 
-Hierarchy comes from placement and labels: application header, two-line operational overview, tab names, table column headers, section labels and body evidence. Plan content separates groups, blocked reasons, dependency/conflict edges, branch/worktree paths and verification commands with blank lines. Review packages use indented JSON. Ticket values use literal Rich `Text`; details, notices, plan and review text disable markup so bracketed content is preserved.
+Hierarchy comes from placement and labels: application header, two-line operational overview, tab names, table column headers, section labels and body evidence. Plan content separates groups, blocked reasons, dependency/conflict edges, branch/worktree paths and verification commands with blank lines. Review packages use readable labeled sections with actual diff text, check results and command argument vectors. Ticket values use literal Rich `Text`; details, notices, plan and review text disable markup so bracketed content is preserved.
 
 ## Layout
 
@@ -113,17 +115,19 @@ The interface uses cell-aligned rectangles and terminal border glyphs. The detai
 
 The table columns are Pick, Ticket, Lifecycle, Priority, Summary, Jira status. Pick renders the literal strings `[x]` and `[ ]`; the row cursor identifies the inspected ticket independently of selection. Row highlighting updates ticket key, summary, lifecycle, description, acceptance criteria and blockers in the focusable details scroll area. Filtering matches key/summary, priority and status without case sensitivity; priority sorting uses Highest through Lowest.
 
-On mount, focus starts in the table. Application bindings are Space to toggle a ticket, P to propose a plan, R to refresh, Ctrl+S to save selection and Q to quit. Textual supplies navigation between focusable controls. Proposing a plan activates Plan and focuses Approve plan; successful launch activates Agents and focuses its ticket-key input. Refreshes of lifecycle cells preserve the table cursor and active filters. Equivalent CLI commands remain available; terminal assistive-technology behavior is not established by the SVG captures.
+On mount, focus starts in the table. Application bindings are Space to toggle a ticket, P to propose a plan, R to refresh, Ctrl+S to save selection and Q to quit. Textual supplies navigation between focusable controls. Proposing a plan activates Plan and focuses Approve plan; successful launch activates Agents and focuses its ticket-key input. Updates refresh the inspected ticket's lifecycle in details as well as table lifecycle cells, preserving the table cursor and active filters. Equivalent CLI commands remain available; terminal assistive-technology behavior is not established by the captures.
 
 ### Evidence and progress
 
-The overview reports profile, mode, board, sprint, selected/total tickets, running/concurrency, blocked and review counts. There are no invented completion percentages. Plans show identity, base and fingerprint, execution groups/slots, blockers, edges, paths and exact verification argument vectors. Agents show lifecycle, PID, branch, worktree and recent log text. Approvals show action, subject, actor or pending status, and fingerprint. Activity lists timestamped events.
+The overview reports profile, mode, board, sprint, selected/total tickets, running/concurrency, blocked and review counts. There are no invented completion percentages. Plans show identity, base and fingerprint, execution groups/slots, blockers, edges, paths and exact verification argument vectors. Agents show lifecycle, PID, branch, worktree and recent text from the recorded active log. Active workers and verification show elapsed seconds when a start time is available; the half-second update loop refreshes logs and elapsed time even when no lifecycle or approval record changes. Source and the live-log behavioral test establish that dynamic behavior.
+
+Review shows ticket/summary, branch/worktree, verification status, check names and pass/fail outcomes, exit codes, durations, exact commands and log paths. Labeled sections present changed files including new files, the actual implementation diff, acceptance criteria, worker summary, review warnings, known risks, feedback history and the loaded fingerprint. This readable evidence is scrollable and renders literally. Approvals show action, subject, actor or pending status, and fingerprint. Activity lists timestamped events.
 
 ### Human confirmation gates
 
 Every confirmation presents **Confirm human approval** and **Go back**, with initial focus on **Go back**. Only an affirmative modal result runs the callback. The gate covers saving the exact selected keys (including empty selection), deferring a ticket through selection saving, approving a plan, rejecting a plan, launching workers, accepting changes, requesting changes with feedback, rerunning verification, deferring review, pausing/canceling a worker and saving execution settings.
 
-Planning approval and launch approval are separate decisions. The plan preview names its fingerprint; launch preview names queued tickets, concurrency and verification commands. Acceptance states that it creates a local commit on the worker branch. Pause/cancel previews state that worktree contents are preserved; deferring review states that work is preserved. Settings saving invalidates current plan approvals and is rejected while workers execute. Push and draft-request approvals are exposed through the CLI, as the Approvals tab explains.
+Planning approval and launch approval are separate decisions. The plan preview names its fingerprint; launch preview names queued tickets, concurrency and verification commands. Acceptance states that it creates a local commit on the worker branch. Pause/cancel previews state that worktree contents are preserved; deferring review states that work is preserved. Settings saving invalidates current plan approvals and is rejected while workers or manual verification execute. Push and draft-request approvals are exposed through the CLI, as the Approvals tab explains.
 
 ### Review and verification binding
 
@@ -135,7 +139,7 @@ Verify again previews the full current check definitions as JSON and the verific
 
 ### Finish-review disposition
 
-The finish review supplied for this documentation pass resolved all five material fixes and recorded **ship** for this terminal surface at the limited evidence scope above:
+The latest finish review records **ship**, with no remaining material fixes, for this terminal surface at the evidence scope above. The earlier five material findings remain resolved:
 
 | Material fix | Recorded disposition | Implementation evidence |
 | --- | --- | --- |
@@ -145,7 +149,7 @@ The finish review supplied for this documentation pass resolved all five materia
 | Acceptance bound to inspected review | Resolved | Loaded key/fingerprint checks and expected fingerprint passed to acceptance |
 | Verification bound to exact approved commands | Resolved | Full command preview and verification fingerprint recheck before execution |
 
-This records the supplied design-review disposition; it does not certify enterprise integration or replace final code validation.
+The current pass also hardens readable review evidence, active log/elapsed refresh, inspected-ticket lifecycle refresh and settings exclusion during manual verification. Source and behavioral tests support those dynamic guarantees; the five current 120×40 PNGs support the visual review of their captured states. The compact 80×24 scope remains the ticket/plan captures and the selection/approval geometry test. This records the supplied design-review disposition; it does not certify enterprise integration or replace final code validation.
 
 ## Do's and Don'ts
 
