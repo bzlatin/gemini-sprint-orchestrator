@@ -1,6 +1,6 @@
 # Validation evidence
 
-Local validation on macOS with Python 3.13, using synthetic data only. No Jira/company service was contacted and no remote branch/repository was created or pushed.
+Pre-publication local validation on macOS with Python 3.13 used synthetic data only. No Jira/company service was contacted. Remote publication was deferred until explicit owner approval.
 
 | Check | Actual result |
 |---|---|
@@ -23,4 +23,4 @@ Textual SVG captures and source/geometry review support terminal layout and inte
 
 Live enterprise Gemini authentication/cache compatibility, Jira MCP schemas/OAuth behavior, Jira Server/Data Center, hosting CLI behavior, Linux execution and the remote GitHub Actions matrix remain target-system validation work. See [enterprise deployment](enterprise.md), [integration compatibility](integrations.md) and [limitations](limitations.md).
 
-Publishing and software license selection remain explicit owner approval steps. The authenticated GitHub integration reported account `bzlatin`; no repository URL is asserted before publication.
+The owner subsequently approved private publication. Both the GitHub integration and authenticated GitHub CLI identified account `bzlatin`. Repository creation returned [bzlatin/gemini-sprint-orchestrator](https://github.com/bzlatin/gemini-sprint-orchestrator), and the GitHub API confirmed `isPrivate: true` before source upload. Software license selection remains undecided.

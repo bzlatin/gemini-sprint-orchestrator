@@ -2,7 +2,7 @@
 
 A local, human-controlled sprint control center for Gemini CLI. Select assigned Jira tickets, inspect dependency plans, run isolated workers, verify changes and review them before any optional remote publication.
 
-**Status:** local implementation with an offline demo and mocked integration coverage. Real Gemini/Jira/hosting compatibility must be validated on the approved target system. No software license has been selected. Publication is pending explicit owner approval.
+**Status:** local implementation with an offline demo and mocked integration coverage. Real Gemini/Jira/hosting compatibility must be validated on the approved target system. Source is published in the owner-approved [private GitHub repository](https://github.com/bzlatin/gemini-sprint-orchestrator). No software license has been selected.
 
 ## Install
 
