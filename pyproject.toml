@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gemini-sprint-orchestrator"
+version = "0.1.0"
+description = "A local, human-controlled sprint control center for Gemini CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["typer>=0.15,<1", "textual>=1,<9", "rich>=13,<16", "pydantic>=2.10,<3", "httpx>=0.27,<1", "mcp>=1.12,<2", "jsonschema>=4,<5"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.11", "mypy>=1.15", "build>=1", "hatchling>=1.26", "editables>=0.5", "types-jsonschema"]
+
+[project.scripts]
+gemini-orchestrator = "gemini_orchestrator.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gemini_orchestrator"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["E501", "B008"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
