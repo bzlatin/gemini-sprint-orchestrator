@@ -19,4 +19,4 @@ The public-use entry point is the synthetic demo. Before connecting company repo
 
 Remaining intentional limits include no managed-OAuth MCP credential scraping, custom agent/skill reuse disabled, no Jira Server/Data Center adapter, no automatic merge of divergent prerequisites, no automatic database migrations, and manual retention of historical runtime data. See limitations.md and enterprise.md.
 
-Repository visibility and public release publication remain explicit owner decisions. No enterprise data was introduced during this development work.
+The owner authorized public repository visibility after the release checks passed. GitHub confirmed the repository is public on 2026-10-21. Package-registry publication is a separate operation. No enterprise data was introduced during this development work.

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1 — public alpha candidate
+## 0.1.1 — public alpha
 
 - Added the owner-selected MIT license and tested dependency constraints.
 - Serialized shared Git metadata mutations across processes and profiles.

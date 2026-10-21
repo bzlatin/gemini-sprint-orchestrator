@@ -11,6 +11,6 @@ The demo and automated tests validate the local lifecycle. They do not establish
 - SQLite schema 1 rejects incompatible versions. There is no automatic schema migration or built-in archival deletion. Each process log is capped at 8 MiB; historical logs have no automatic rotation; apply a reviewed retention policy and monitor free disk space.
 - One coordinator per profile/scope is allowed. Some CLI operations require closing the active dashboard to acquire the same session lock.
 - Remote adapter behavior is mocked in tests; actual CLI versions and auth require target validation. Draft creation failures consume the grant so retries need fresh confirmation.
-- The source is licensed under MIT. Repository visibility remains an owner decision: [bzlatin/gemini-sprint-orchestrator](https://github.com/bzlatin/gemini-sprint-orchestrator).
+- The source is licensed under MIT. The public repository is: [bzlatin/gemini-sprint-orchestrator](https://github.com/bzlatin/gemini-sprint-orchestrator).
 
 Optional Gemini semantic analysis (`plan --semantic --enable-connected`) is advisory and may miss conflicts. Source excerpts are bounded and limited to declared relevant paths; it does not claim a complete semantic codebase index. Request/branch retrieval adapters exist, but live remote MR/PR context is not automatically included in planning.

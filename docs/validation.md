@@ -1,6 +1,6 @@
 # Validation evidence — 0.1.1
 
-Release checks used synthetic data only. No company service or real model account was contacted. The owner selected MIT and approved source upload to the private [GitHub repository](https://github.com/bzlatin/gemini-sprint-orchestrator). Public visibility remains a separate owner decision.
+Release checks used synthetic data only. No company service or real model account was contacted. The owner selected MIT, approved the initial private source upload and subsequently authorized public visibility after CI passed. On 2026-10-21 the GitHub API confirmed `private: false` and `visibility: public` for the [repository](https://github.com/bzlatin/gemini-sprint-orchestrator).
 
 | Check | Actual result |
 |---|---|
@@ -21,7 +21,7 @@ Release checks used synthetic data only. No company service or real model accoun
 | GitHub Actions / macOS Python 3.11 | 98 passed; lint, types, CLI self-test and build passed |
 | GitHub Actions / macOS Python 3.13 | 98 passed; lint, types, CLI self-test and build passed |
 
-The complete [GitHub Actions run](https://github.com/bzlatin/gemini-sprint-orchestrator/actions/runs/39665272473) passed all five jobs for implementation commit `a66fbc0f3b46e884539364a9fd85ff5716b5867f`. The subsequent evidence update changes documentation only.
+The complete [GitHub Actions run](https://github.com/bzlatin/gemini-sprint-orchestrator/actions/runs/39665272473) passed all five jobs for implementation commit `a66fbc0f3b46e884539364a9fd85ff5716b5867f`. Subsequent evidence and publication-status updates change documentation only.
 
 The suite covers profile isolation/onboarding, exact identity checks, mocked REST pagination/errors, known-read MCP capability checks, a real local stdio MCP server, deterministic scheduling/cycles/conflicts, approval invalidation, real isolated worktrees, multiprocess Git mutation, concurrent subprocesses, prompt/output deadlines, bounded logs, cancellation/crash cleanup, persistent recovery, verification snapshots, feedback continuation, new/binary-file review, review fingerprints, Markdown reporting, Textual interactions and mocked hosting operations. Six concurrent processes exercise shared Git metadata locking.
 
