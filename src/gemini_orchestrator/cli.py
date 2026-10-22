@@ -130,6 +130,70 @@ def start(ctx: typer.Context, enable_connected: bool = False) -> None:
         Dashboard(engine, registry(ctx), connected_enabled=True).run()
 
 
+@app.command("worker-home")
+def worker_home(ctx: typer.Context, key: str) -> None:
+    """Print this ticket's isolated provider home for approved authentication; no credentials copied."""
+    from .isolation import scratch
+
+    with session(ctx) as engine:
+        engine.store.ticket(key)
+        console.print(str(scratch(engine.runtime, key)))
+
+
+@app.command()
+def ask(ctx: typer.Context, key: str, question: str, enable_connected: bool = False) -> None:
+    """Ask about a completed worker without granting coding or shell tools. Close the dashboard first."""
+    from .models import digest
+
+    with session(ctx) as engine:
+        if engine.profile.mode == "connected" and not enable_connected:
+            raise OrchestratorError("Questions require --enable-connected on an approved machine")
+        preview = engine.session_preview(key, question)
+        console.print(json.dumps(preview, indent=2))
+        human_confirm(
+            "Send this read-only question to the model? No coding turn or native-session resume is authorized"
+        )
+        engine.store.grant(
+            engine.store.request("ask", key, digest(preview)), engine.profile.display_name
+        )
+        console.print(asyncio.run(engine.ask(key, question, connected_enabled=enable_connected)))
+
+
+@app.command()
+def storage(
+    ctx: typer.Context, days: Annotated[int, typer.Option(min=1)] = 30, prune_logs: bool = False
+) -> None:
+    """Show bounded disk usage; optionally confirm removal of old non-current logs only."""
+    from .storage import old_logs, usage
+
+    with session(ctx) as engine:
+        limits = engine.profile.isolation
+        try:
+            console.print(usage(engine.runtime, limits.max_runtime_bytes, limits.max_files))
+        except OrchestratorError as exc:
+            console.print(str(exc))
+        current: set[str] = set()
+        for row in engine.store.rows():
+            for column in ("result", "verification"):
+                value = json.loads(row[column] or "{}")
+                for record in [value, *value.get("results", [])]:
+                    if record.get("log"):
+                        current.add(record["log"])
+        candidates = old_logs(engine.runtime, days, current)
+        console.print(json.dumps(candidates, indent=2))
+        if prune_logs and candidates:
+            human_confirm(
+                "Delete exactly these historical logs? Current logs, database, messages and worktrees are preserved"
+            )
+            if old_logs(engine.runtime, days, current) != candidates:
+                raise OrchestratorError("Log candidates changed; review storage again")
+            for item in candidates:
+                (engine.runtime / "logs" / str(item["name"])).unlink()
+            engine.store.event(
+                f"Human removed {len(candidates)} historical logs older than {days} days"
+            )
+
+
 @app.command()
 def doctor(ctx: typer.Context) -> None:
     """Check local tooling and profile configuration without contacting Jira."""

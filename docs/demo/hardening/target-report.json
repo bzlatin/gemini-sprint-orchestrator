@@ -1,0 +1,9 @@
+{
+  "mode": "synthetic harness",
+  "initial_worker_and_checks": "passed",
+  "same_branch_and_worktree": true,
+  "native_uuid_resume": "synthetic mode; not tested",
+  "read_only_question": "passed",
+  "jira_or_hosting_contacted": false,
+  "vscode_gui": "manual validation required"
+}

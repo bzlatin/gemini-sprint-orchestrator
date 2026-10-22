@@ -2,6 +2,9 @@ name: Validate
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "37 9 * * 1"
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -19,11 +22,31 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
+      - name: Install real Linux sandbox
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          # This disposable runner must permit bubblewrap user namespaces.
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --unshare-all --ro-bind / / -- /bin/true
       - run: python -m pip install -c requirements-dev.lock -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy src/gemini_orchestrator
       - run: python -m pytest -q --junitxml=test-results.xml
+      - name: Require sandbox boundary tests to execute
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('test-results.xml')
+          required = {'test_os_sandbox_enforces_write_boundary', 'test_real_connected_worker_with_synthetic_cli', 'test_native_gemini_session_id_is_resumed_exactly', 'test_verification_cannot_read_controller_or_send_network', 'test_worker_cannot_read_bridge_or_other_worktree', 'test_read_only_question_has_os_write_denial', 'test_connected_read_only_question_uses_separate_policy'}
+          cases = {c.get('name'): c for c in root.iter('testcase') if c.get('name') in required}
+          assert set(cases) == required
+          assert all(c.find('skipped') is None for c in cases.values()), 'Required sandbox tests were skipped'
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

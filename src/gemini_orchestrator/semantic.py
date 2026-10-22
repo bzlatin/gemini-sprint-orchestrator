@@ -6,6 +6,7 @@ from typing import Any
 
 from .config import atomic_write
 from .gemini import Gemini
+from .isolation import wrap
 from .models import Edge, OrchestratorError, Plan, Profile
 from .process import Supervisor
 
@@ -31,8 +32,9 @@ async def recommendations(
         }
     )
     log = runtime / "logs" / f"analysis-{plan.id}.log"
-    result = await Supervisor().run(
-        "analysis",
+    argv, env = await asyncio.to_thread(
+        wrap,
+        profile,
         [
             gemini.executable,
             "--admin-policy",
@@ -43,9 +45,19 @@ async def recommendations(
             "Analyze the JSON context from stdin.",
         ],
         profile.repository,
+        runtime,
+        "ANALYSIS",
+        worker=True,
+        read_only=True,
+    )
+    result = await Supervisor().run(
+        "analysis",
+        argv,
+        profile.repository,
         min(profile.gemini.timeout, 300),
         log,
         stdin=prompt,
+        env=env,
     )
     if not result["passed"]:
         raise OrchestratorError(f"Gemini semantic analysis failed; inspect {log}")

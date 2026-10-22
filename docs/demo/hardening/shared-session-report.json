@@ -1,0 +1,38 @@
+{
+  "mode": "synthetic shared-session walkthrough",
+  "steps": [
+    "Launched two synthetic workers with separate plan and launch approvals",
+    "Declined a dashboard message and preserved its draft",
+    "Confirmed a dashboard follow-up; reused the worktree and reran verification",
+    "Validated the generated VS Code workspace and shared-terminal process task; editor executable mocked",
+    "Sent and confirmed a follow-up through the actual editor terminal app",
+    "Observed the editor message and reply in the main dashboard",
+    "Confirmed compact controls remain visible in both views"
+  ],
+  "vscode_application_launched": false,
+  "editor_workspace": {
+    "branch_matches": true,
+    "worktree_matches": true,
+    "process_task_uses_same_coordinator": true,
+    "launch_argument_count": 3
+  },
+  "conversation_roles": [
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+    "assistant"
+  ],
+  "final_state": "READY_FOR_REVIEW",
+  "same_branch_and_worktree": true,
+  "verification": "passed",
+  "captures": [
+    "dashboard-session-120.svg",
+    "dashboard-session-80.svg",
+    "editor-session-120.svg",
+    "editor-session-80.svg",
+    "session-confirmation-120.svg"
+  ],
+  "conversation_survived_restart": true
+}

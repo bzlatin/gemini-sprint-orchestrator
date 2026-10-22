@@ -1,4 +1,4 @@
-# Public alpha release readiness — 0.2.0
+# Public alpha release readiness — 0.3.0
 
 This release is prepared for public evaluation of the local application and synthetic demo. Connected enterprise deployment is a separate approval and compatibility exercise. It is not advertised as production-certified automation.
 
@@ -14,10 +14,10 @@ This release is prepared for public evaluation of the local application and synt
 | Remote control | Exact source SHA, destination repository and request content bound to approval |
 | Dependencies | Tested constraints and runtime inventory; pip-audit found no known vulnerabilities in the pinned runtime set |
 | Source disclosure | Existing history and current tracked source scanned offline; synthetic credential fixtures individually annotated |
-| CI | [0.2.0 validation](https://github.com/bzlatin/gemini-sprint-orchestrator/actions/runs/39707440075) passed all five jobs: macOS 116 passed; Ubuntu 113 passed / 3 platform skips, on Python 3.11 and 3.13 |
-| Package | 0.2.0 wheel/sdist and installed-wheel checks recorded in validation.md |
+| Prior CI | [0.2.0 validation](https://github.com/bzlatin/gemini-sprint-orchestrator/actions/runs/39707440075) passed all five jobs: macOS 116 passed; Ubuntu 113 passed / 3 platform skips, on Python 3.11 and 3.13 |
+| Current checks | 0.3.0 candidate validation in progress; see validation.md |
 
-The public-use entry point is the synthetic demo. Before connecting company repositories, validate the actual Gemini version, auth/cache writes, MCP identity/search safety, sprint scope, sandbox behavior and hosting credentials on the approved work system. The existing worker OS policy restricts writes; the trusted Gemini process still has local read/model-provider access. Configured verification scripts run with your account's authority after command approval.
+The public-use entry point is the synthetic demo. Before connecting company repositories, validate the actual Gemini version, auth/cache writes, MCP identity/search safety, sprint scope, sandbox behavior and hosting credentials on the approved work system. The OS policy restricts reads and writes; the trusted Gemini process retains approved provider access. Verification runs with a clean environment, scoped filesystem and network denied.
 
 Remaining intentional limits include no managed-OAuth MCP credential scraping, custom agent/skill reuse disabled, no Jira Server/Data Center adapter, no automatic merge of divergent prerequisites, no automatic database migrations, and manual retention of historical runtime data. See limitations.md and enterprise.md.
 

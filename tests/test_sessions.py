@@ -354,9 +354,11 @@ async def test_pausing_one_worker_keeps_other_workers_supervised(engine: Engine)
     count = 0
     original = engine.supervisor.run
 
-    async def slow_worker(key, argv, cwd, worker_deadline, log, on_start=None, stdin=None):
+    async def slow_worker(
+        key, argv, cwd, worker_deadline, log, on_start=None, stdin=None, **kwargs
+    ):
         if ":verify" in key:
-            return await original(key, argv, cwd, worker_deadline, log, on_start, stdin)
+            return await original(key, argv, cwd, worker_deadline, log, on_start, stdin, **kwargs)
 
         def running(pid, token):
             nonlocal count
@@ -373,6 +375,7 @@ async def test_pausing_one_worker_keeps_other_workers_supervised(engine: Engine)
             worker_deadline,
             log,
             running,
+            **kwargs,
         )
 
     with patch.object(engine.supervisor, "run", side_effect=slow_worker):
@@ -442,14 +445,14 @@ async def test_editor_client_can_pause_verification_without_losing_work(engine: 
     started = asyncio.Event()
     original = engine.supervisor.run
 
-    async def observed(key, argv, cwd, worker_deadline, log, on_start=None, stdin=None):
+    async def observed(key, argv, cwd, worker_deadline, log, on_start=None, stdin=None, **kwargs):
         def running(pid, token):
             if on_start:
                 on_start(pid, token)
             if ":verify" in key:
                 started.set()
 
-        return await original(key, argv, cwd, worker_deadline, log, running, stdin)
+        return await original(key, argv, cwd, worker_deadline, log, running, stdin, **kwargs)
 
     bridge = SessionBridge(engine)
     await bridge.start()

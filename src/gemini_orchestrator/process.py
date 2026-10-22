@@ -18,6 +18,8 @@ class Supervisor:
         self.running: dict[str, asyncio.subprocess.Process] = {}
         self.max_log_bytes = max_log_bytes
         self._starting: set[str] = set()
+        self.storage_limits: tuple[int, int] | None = None
+        self.storage_roots: dict[str, list[Path]] = {}
 
     async def run(
         self,
@@ -28,6 +30,8 @@ class Supervisor:
         log: Path,
         on_start: Callable[[int, str], None] | None = None,
         stdin: str | None = None,
+        *,
+        env: dict[str, str] | None = None,
     ) -> dict[str, object]:
         if key in self.running or key in self._starting:
             raise OrchestratorError(f"{key} already has a process")
@@ -41,6 +45,8 @@ class Supervisor:
         timed_out = False
         output_limited = False
         input_error = ""
+        storage_error = ""
+        monitor: asyncio.Task[None] | None = None
         pump: asyncio.Task[bool] | None = None
         with os.fdopen(fd, "wb") as output:
             self._starting.add(key)
@@ -49,11 +55,13 @@ class Supervisor:
                 async with asyncio.timeout(timeout_seconds):
                     proc = await asyncio.create_subprocess_exec(
                         sys.executable,
+                        "-I",
                         str(runner),
                         str(os.getpid()),
                         token,
                         *argv,
                         cwd=cwd,
+                        env=env,
                         stdin=asyncio.subprocess.PIPE
                         if stdin is not None
                         else asyncio.subprocess.DEVNULL,
@@ -75,15 +83,44 @@ class Supervisor:
                         except (BrokenPipeError, ConnectionResetError) as exc:
                             input_error = type(exc).__name__
                             await self.stop(key)
+                    limits = self.storage_limits
+                    if limits:
+
+                        async def watch_storage() -> None:
+                            nonlocal storage_error
+                            from .storage import usage
+
+                            while True:
+                                try:
+                                    for root in [cwd, *self.storage_roots.get(key, [])]:
+                                        await asyncio.to_thread(usage, root, *limits)
+                                except (OSError, OrchestratorError) as exc:
+                                    storage_error = str(exc)
+                                    await self.stop(key)
+                                    return
+                                await asyncio.sleep(0.5)
+
+                        monitor = asyncio.create_task(watch_storage())
                     await proc.wait()
                     output_limited = await asyncio.shield(pump)
             except TimeoutError:
                 timed_out = True
             finally:
+                if monitor is not None:
+                    monitor.cancel()
+                    await asyncio.gather(monitor, return_exceptions=True)
                 self._starting.discard(key)
                 # Cleanup also runs on cancellation, callback failure and broken input pipes.
                 if proc is not None:
                     await self.stop(key)
+                if self.storage_limits:
+                    from .storage import usage
+
+                    try:
+                        for root in [cwd, *self.storage_roots.pop(key, [])]:
+                            await asyncio.to_thread(usage, root, *self.storage_limits)
+                    except (OSError, OrchestratorError) as exc:
+                        storage_error = str(exc)
                 if pump is not None:
                     if not pump.done():
                         pump.cancel()
@@ -97,12 +134,14 @@ class Supervisor:
             "timeout": timed_out,
             "output_limited": output_limited,
             "input_error": input_error,
+            "storage_error": storage_error,
             "log": str(log),
             "passed": proc is not None
             and proc.returncode == 0
             and not timed_out
             and not output_limited
-            and not input_error,
+            and not input_error
+            and not storage_error,
         }
 
     async def _capture(self, key: str, stream: asyncio.StreamReader, output: IO[bytes]) -> bool:

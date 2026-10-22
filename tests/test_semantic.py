@@ -51,6 +51,7 @@ async def test_semantic_results_cannot_become_authoritative(engine: Engine, kind
         ),
         patch("gemini_orchestrator.semantic.Gemini.assert_supplemental_policy"),
         patch("gemini_orchestrator.semantic.Supervisor.run", side_effect=fake_run),
+        patch("gemini_orchestrator.semantic.wrap", return_value=(["gemini", "--admin-policy"], {})),
     ):
         if kind == "confirmed":
             with pytest.raises(OrchestratorError, match="invalid advisory"):

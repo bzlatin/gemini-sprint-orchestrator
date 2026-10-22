@@ -162,8 +162,7 @@ def test_gemini_worker_policy_deny_shell_and_mcp(engine: Engine) -> None:
         patch.object(
             Gemini, "inspect", return_value={"prompt": True, "json": True, "admin_policy": True}
         ),
-        patch("gemini_orchestrator.gemini.platform.system", return_value="Darwin"),
-        patch("gemini_orchestrator.gemini.shutil.which", return_value="/usr/bin/sandbox-exec"),
+        patch("gemini_orchestrator.isolation.wrap", return_value=(["sandbox-exec"], {})),
     ):
         argv, prompt = Gemini().worker(
             engine.profile,
@@ -199,34 +198,26 @@ def test_os_sandbox_enforces_write_boundary(engine: Engine, tmp_path: Path) -> N
     import subprocess
     import sys
 
-    from gemini_orchestrator.demo import demo_tickets
+    from gemini_orchestrator.isolation import wrap
 
-    if platform.system() != "Darwin" or not shutil.which("sandbox-exec"):
-        pytest.skip(
-            "macOS sandbox-exec boundary test; Linux bubblewrap configuration is mocked separately"
-        )
-    with patch.object(
-        Gemini, "inspect", return_value={"prompt": True, "json": True, "admin_policy": True}
-    ):
-        argv, _ = Gemini().worker(
-            engine.profile, demo_tickets()[0], engine.profile.repository, engine.runtime, []
-        )
+    if not shutil.which("sandbox-exec" if platform.system() == "Darwin" else "bwrap"):
+        pytest.skip("Supported OS sandbox is unavailable")
     allowed = engine.profile.repository / "allowed.txt"
     denied = tmp_path / "outside.txt"
-    script = (
-        "from pathlib import Path; Path("
-        + repr(str(allowed))
-        + ").write_text('allowed'); Path("
-        + repr(str(denied))
-        + ").write_text('denied')"
+    script = f"from pathlib import Path; Path({str(allowed)!r}).write_text('allowed'); Path({str(denied)!r}).write_text('denied')"
+    argv, env = wrap(
+        engine.profile,
+        [sys.executable, "-c", script],
+        engine.profile.repository,
+        engine.runtime,
+        "DEMO-1",
+        worker=True,
     )
     result = subprocess.run(
-        [*argv[:3], sys.executable, "-c", script], capture_output=True, text=True
+        argv, env=env, cwd=engine.profile.repository, capture_output=True, text=True
     )
     if "sandbox_apply: Operation not permitted" in result.stderr:
-        pytest.skip(
-            "Host sandbox cannot nest sandbox-exec; run this test with approved local process access"
-        )
+        pytest.skip("Host sandbox cannot nest sandbox-exec")
     assert result.returncode != 0
     assert allowed.read_text() == "allowed"
     assert not denied.exists()

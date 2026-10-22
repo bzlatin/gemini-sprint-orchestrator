@@ -32,6 +32,7 @@ class SessionBridge:
         self.server: asyncio.Server | None = None
         self.directory: tempfile.TemporaryDirectory[str] | None = None
         self.handlers: set[asyncio.Task[Any]] = set()
+        self.scoped_descriptors: set[Path] = set()
 
     async def start(self) -> None:
         if self.server is not None:
@@ -45,9 +46,25 @@ class SessionBridge:
             )
             socket.chmod(0o600)
             atomic_write(self.descriptor, json.dumps({"socket": str(socket), "token": self.token}))
+            for row in self.engine.store.rows():
+                if row["worktree"]:
+                    self.descriptor_for(row["key"])
         except BaseException:
             await self.close()
             raise
+
+    def descriptor_for(self, key: str) -> Path:
+        self.engine.store.ticket(key)
+        if not self.directory:
+            raise OrchestratorError("Conversation bridge is unavailable")
+        path = self.engine.runtime / "editors" / f"{key}.connection.json"
+        token = hmac.digest(self.token.encode(), key.encode(), "sha256").hex()
+        atomic_write(
+            path,
+            json.dumps({"socket": str(Path(self.directory.name) / "session.sock"), "token": token}),
+        )
+        self.scoped_descriptors.add(path)
+        return path
 
     async def close(self) -> None:
         if self.server is not None:
@@ -64,6 +81,9 @@ class SessionBridge:
                     self.descriptor.unlink()
             except (OSError, ValueError):
                 pass
+        for path in self.scoped_descriptors:
+            path.unlink(missing_ok=True)
+        self.scoped_descriptors.clear()
         if self.directory is not None:
             self.directory.cleanup()
             self.directory = None
@@ -82,13 +102,18 @@ class SessionBridge:
         }
 
     async def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(request.get("token"), str) or not hmac.compare_digest(
-            request["token"].encode(), self.token.encode()
-        ):
-            raise OrchestratorError("Session connection expired; reopen it from the dashboard")
         key = request.get("key")
         if not isinstance(key, str) or len(key) > 100:
             raise OrchestratorError("Choose a valid ticket key")
+        token = request.get("token")
+        scoped = hmac.digest(self.token.encode(), key.encode(), "sha256").hex()
+        if not isinstance(token, str) or not (
+            hmac.compare_digest(token.encode(), self.token.encode())
+            or hmac.compare_digest(token.encode(), scoped.encode())
+        ):
+            raise OrchestratorError(
+                "Session connection expired or belongs to another ticket; reopen it from the dashboard"
+            )
         action = request.get("action")
         if action == "snapshot":
             return self.engine.session_snapshot(key)
@@ -130,6 +155,10 @@ class SessionBridge:
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
         assert task is not None
+        if len(self.handlers) >= 16:
+            writer.close()
+            await writer.wait_closed()
+            return
         self.handlers.add(task)
         try:
             try:
@@ -199,6 +228,9 @@ async def open_vscode(engine: Engine, key: str, bridge: SessionBridge) -> Path:
             "The conversation bridge is unavailable; reopen the dashboard first"
         )
     snapshot = engine.session_snapshot(key)
+    from .isolation import assert_editor_safe
+
+    assert_editor_safe(Path(snapshot["worktree"]))
     executable = shutil.which("code")
     if executable is None and platform.system() == "Darwin":
         for root in (Path("/Applications"), Path.home() / "Applications"):
@@ -210,7 +242,7 @@ async def open_vscode(engine: Engine, key: str, bridge: SessionBridge) -> Path:
         raise OrchestratorError(
             "VS Code CLI 'code' was not found. In VS Code run 'Shell Command: Install code command in PATH', then restart this terminal"
         )
-    descriptor = base64.urlsafe_b64encode(os.fsencode(bridge.descriptor)).decode()
+    descriptor = base64.urlsafe_b64encode(os.fsencode(bridge.descriptor_for(key))).decode()
     workspace = engine.runtime / "editors" / f"{key}.code-workspace"
     document = {
         "folders": [{"name": f"{key} [{snapshot['branch']}]", "path": snapshot["worktree"]}],

@@ -182,6 +182,13 @@ class GeminiSettings(BaseModel):
     reuse_skills: bool = False
 
 
+class IsolationSettings(BaseModel):
+    tool_read_paths: list[Path] = Field(default_factory=list)
+    max_worktree_bytes: int = Field(default=512 * 1024 * 1024, ge=1024)
+    max_runtime_bytes: int = Field(default=2 * 1024 * 1024 * 1024, ge=1024)
+    max_files: int = Field(default=50000, ge=10)
+
+
 class Profile(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str
@@ -200,6 +207,7 @@ class Profile(BaseModel):
     jira: JiraSettings = Field(default_factory=JiraSettings)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
     checks: list[Check] = Field(default_factory=list)
+    isolation: IsolationSettings = Field(default_factory=IsolationSettings)
     hosting: str = "local"
     remote_writes: bool = False
     protected_branches: list[str] = Field(

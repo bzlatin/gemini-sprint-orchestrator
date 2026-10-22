@@ -2,6 +2,23 @@
 
 Release checks used synthetic data only. No company service or real model account was contacted. The owner selected MIT, approved the initial private source upload and subsequently authorized public visibility after CI passed. On 2026-10-21 the GitHub API confirmed `private: false` and `visibility: public` for the [repository](https://github.com/bzlatin/gemini-sprint-orchestrator).
 
+## 0.3.0 — execution isolation
+
+The release adds restricted filesystem reads/writes and clean environments for workers/checks, network-free verification, protected execution configuration, scoped editor credentials, approved read-only questions, soft disk limits and manual log retention. The runtime dependency set is unchanged.
+
+| Check | Actual result |
+|---|---|
+| Local regression suite | 133 passed in 119.09 seconds; macOS / Python 3.13 |
+| macOS process boundaries | Real synthetic processes denied controller/sibling-worktree/symlink reads, localhost networking in checks, and question-mode source writes |
+| Configuration and credentials | Editor execution configuration refused; worker configuration writes denied; wrong-ticket and stale-generation credentials rejected |
+| Question continuity | Synthetic connected CLI used a separate read-only tool policy, did not resume coding, and preserved implementation evidence |
+| Disk controls | Oversized process stopped; symlink/current logs excluded from retention candidates |
+| Static checks | Ruff and Mypy passed for 24 source files |
+| Package | 0.3.0 wheel/sdist built; installed wheel passed pip check, CLI self-test, full shared-session UI walkthrough and target harness in synthetic mode |
+| CI | Current macOS/Linux matrix and mandatory real sandbox checks pending push |
+
+The [recorded reports](demo/hardening/README.md) contain synthetic data only. The new [target validation harness](hardening.md#approved-target-machine-exercise) is available for approved real-provider/editor tests. Gemini and VS Code are absent here; their real authentication, GUI and Remote SSH behavior remain unvalidated. The Linux CI configuration now installs bubblewrap and rejects skipped boundary tests instead of counting them as coverage. Watchdog disk limits can overshoot between polls and are not kernel quotas. Same-account unsandboxed clients remain trusted.
+
 ## 0.2.0 — shared worker conversations
 
 The extension adds exact-worktree editor opening and the same supervised conversation in the dashboard/editor terminal. The checks below record the release candidate and its bounded synthetic evidence.

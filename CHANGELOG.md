@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — execution isolation
+
+- Sandboxed verification with network disabled, clean environments and restricted host reads; no unsafe fallback.
+- Isolated per-ticket provider homes, read-only questions and advisory analysis.
+- Protected worker/editor configuration and ticket-bound rotating editor bridge credentials.
+- Added soft storage watchdogs, runtime preflight limits and explicit historical-log retention.
+- Added a synthetic/opt-in real-provider target validation harness and mandatory Linux sandbox CI coverage.
+- Scheduled weekly dependency/secret auditing and Dependabot update proposals.
+- Authentication no longer inherits the personal Gemini home; existing profiles require fresh plan approval.
+
 ## 0.2.0 — shared worker conversations
 
 - Added a Sessions tab with persisted messages, replies, output, drafts and explicit follow-up approval.

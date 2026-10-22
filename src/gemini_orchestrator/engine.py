@@ -15,6 +15,7 @@ from .config import atomic_write
 from .demo import demo_tickets
 from .gemini import Gemini
 from .git import Git
+from .isolation import environment, scratch, wrap
 from .jira import JiraConnection
 from .models import TRANSITIONS, Edge, OrchestratorError, Plan, Profile, State, digest
 from .planning import create_plan
@@ -55,6 +56,10 @@ class Engine:
             ) from exc
         self.store = Store(runtime / "state.db")
         self.supervisor = Supervisor()
+        self.supervisor.storage_limits = (
+            profile.isolation.max_worktree_bytes,
+            profile.isolation.max_files,
+        )
         self.executing = False
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.stop_states: dict[str, State] = {}
@@ -405,6 +410,13 @@ class Engine:
 
     async def run_ticket(self, key: str, plan: Plan) -> None:
         try:
+            from .storage import usage
+
+            usage(
+                self.runtime,
+                self.profile.isolation.max_runtime_bytes,
+                self.profile.isolation.max_files,
+            )
             row = self.store.row(key)
             if row["worktree"]:
                 git = self.validate_worktree(row)
@@ -503,6 +515,7 @@ class Engine:
                         ),
                     )
 
+                self.supervisor.storage_roots[key] = [scratch(self.runtime, key)]
                 result = await self.supervisor.run(
                     key,
                     argv,
@@ -511,6 +524,21 @@ class Engine:
                     log,
                     on_start,
                     prompt,
+                    env=environment(
+                        scratch(self.runtime, key), model=self.profile.mode == "connected"
+                    )
+                    | (
+                        {
+                            "GEMINI_CLI_SYSTEM_SETTINGS_PATH": str(
+                                self.runtime / "worker-settings.json"
+                            ),
+                            "GEMINI_CLI_SYSTEM_DEFAULTS_PATH": str(
+                                self.runtime / "worker-settings.json"
+                            ),
+                        }
+                        if self.profile.mode == "connected"
+                        else {}
+                    ),
                 )
                 result["started_at"] = started
                 result["session_id"] = session_id
@@ -557,6 +585,7 @@ class Engine:
                         "role": "system",
                         "text": str(
                             result.get("failure")
+                            or result.get("storage_error")
                             or "Worker failed or timed out. Inspect the log before retrying."
                         ),
                     },
@@ -697,6 +726,10 @@ class Engine:
             "key": key,
             "message": message.strip(),
             "history": digest(row["feedback"]),
+            "conversation_id": self.store.db.execute(
+                "SELECT COALESCE(MAX(id),0) FROM runs WHERE ticket=? AND kind='conversation'",
+                (key,),
+            ).fetchone()[0],
             "turn": self.store.db.execute(
                 "SELECT COALESCE(MAX(id),0) FROM runs WHERE ticket=? AND kind='worker'", (key,)
             ).fetchone()[0],
@@ -763,6 +796,66 @@ class Engine:
         self.board()
         return task
 
+    async def ask(self, key: str, question: str, *, connected_enabled: bool = False) -> str:
+        preview = self.session_preview(key, question)
+        self.store.require("ask", key, digest(preview), consume=True)
+        if self.profile.mode == "connected" and not connected_enabled:
+            raise OrchestratorError("Read-only model questions require --enable-connected")
+        git = self.validate_worktree(self.store.row(key))
+        before = git.fingerprint()
+        self.executing = True
+        try:
+            if self.profile.mode == "demo":
+                answer = "Synthetic read-only answer: inspect the recorded implementation and verification. No files were changed."
+            else:
+                argv, prompt = await asyncio.to_thread(
+                    Gemini(self.profile.gemini.executable).worker,
+                    self.profile,
+                    self.store.ticket(key),
+                    git.root,
+                    self.runtime,
+                    [question],
+                    conversation=self.conversation(key),
+                    read_only=True,
+                )
+                home = scratch(self.runtime, key, "ask")
+                env = environment(home, model=True) | {
+                    "GEMINI_CLI_SYSTEM_SETTINGS_PATH": str(self.runtime / "worker-settings.json"),
+                    "GEMINI_CLI_SYSTEM_DEFAULTS_PATH": str(self.runtime / "worker-settings.json"),
+                }
+                log = self.runtime / "logs" / f"{key}-ask-{uuid.uuid4().hex[:12]}.log"
+                self.supervisor.storage_roots[f"{key}:ask"] = [home]
+                result = await self.supervisor.run(
+                    f"{key}:ask",
+                    argv,
+                    git.root,
+                    self.profile.gemini.timeout,
+                    log,
+                    stdin=prompt,
+                    env=env,
+                )
+                self.store.run_record(key, "question", result)
+                if not result["passed"]:
+                    raise OrchestratorError("Read-only question failed; inspect its bounded log")
+                output = json.loads(log.read_text())
+                if output.get("error") or not isinstance(output.get("response"), str):
+                    raise OrchestratorError("Invalid read-only question response")
+                answer = output["response"][:32000]
+            if git.fingerprint() != before:
+                raise OrchestratorError(
+                    "Worktree changed during the read-only question; reverify and review it"
+                )
+            self.store.run_record(
+                key, "conversation", {"role": "user", "text": question, "mode": "ask"}
+            )
+            self.store.run_record(
+                key, "conversation", {"role": "assistant", "text": answer, "mode": "ask"}
+            )
+            return answer
+        finally:
+            self.executing = False
+            self.board()
+
     def verification_fingerprint(self, key: str) -> str:
         row = self.store.row(key)
         git = self.validate_worktree(row)
@@ -792,12 +885,17 @@ class Engine:
         before = git.fingerprint()
         results = []
         for index, check in enumerate(checks):
+            argv, env = wrap(self.profile, check.argv, git.root, self.runtime, key)
+            self.supervisor.storage_roots[f"{key}:verify"] = [
+                scratch(self.runtime, key, "verification")
+            ]
             result = await self.supervisor.run(
                 f"{key}:verify",
-                check.argv,
+                argv,
                 git.root,
                 check.timeout,
                 self.runtime / "logs" / f"{key}-check-{uuid.uuid4().hex[:12]}-{index}.log",
+                env=env,
             )
             result.update({"name": check.name, "required": check.required})
             results.append(result)

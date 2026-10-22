@@ -2,7 +2,7 @@
 
 A local, human-controlled sprint control center for Gemini CLI. Select assigned Jira tickets, inspect dependency plans, run isolated workers, verify changes and review them before optional remote publication.
 
-**Version 0.2.0 is an MIT-licensed public alpha.** The offline demo is the supported starting point. Connected Gemini/Jira/hosting configurations require validation on the approved target system; this is not an enterprise security certification. See [release readiness](docs/release-readiness.md) and [known limitations](docs/limitations.md).
+**Version 0.3.0 is an MIT-licensed public alpha.** The offline demo is the supported starting point. Connected Gemini/Jira/hosting configurations require validation on the approved target system; this is not an enterprise security certification. See [release readiness](docs/release-readiness.md) and [known limitations](docs/limitations.md).
 
 ![Synthetic ticket explorer](docs/demo/01-selection.png)
 
@@ -50,6 +50,10 @@ gemini-orchestrator --profile demo session DEMO-1
 ```
 
 See the [shared-session walkthrough](docs/demo/sessions/README.md) and [session guide](docs/sessions.md) for evidence and limits.
+
+## Isolated checks and read-only questions
+
+Version 0.3.0 sandboxes verification, removes inherited secrets, isolates provider homes, protects editor/agent execution configuration, and binds editor credentials to one ticket. Linux needs working bubblewrap even for the demo. Use `ask KEY QUESTION` for an approved read-only model turn and `storage` to inspect disk use or explicitly prune historical logs. Existing profiles need fresh plan approval because the isolation settings change their configuration fingerprint. See the [hardening guide](docs/hardening.md) for authentication changes, limits and the target-machine validation harness.
 
 ## Connected setup
 
