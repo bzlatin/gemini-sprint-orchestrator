@@ -2,7 +2,7 @@
 
 A local, human-controlled sprint control center for Gemini CLI. Select assigned Jira tickets, inspect dependency plans, run isolated workers, verify changes and review them before optional remote publication.
 
-**Version 0.3.0 is an MIT-licensed public alpha.** The offline demo is the supported starting point. Connected Gemini/Jira/hosting configurations require validation on the approved target system; this is not an enterprise security certification. See [release readiness](docs/release-readiness.md) and [known limitations](docs/limitations.md).
+**Version 0.4.0 is an MIT-licensed public alpha.** The offline demo is the supported starting point. Connected Gemini/Jira/hosting configurations require validation on the approved target system; this is not an enterprise security certification. See [release readiness](docs/release-readiness.md) and [known limitations](docs/limitations.md).
 
 ![Synthetic ticket explorer](docs/demo/01-selection.png)
 
@@ -66,7 +66,9 @@ gemini-orchestrator jira test --enable-connected
 gemini-orchestrator start --enable-connected
 ```
 
-Setup can save local settings without connecting to Jira. It detects Gemini capabilities, confirms the authenticated immutable identity, distinguishes team/project/board, discovers active sprints when supported, validates Git without changing the checkout, configures limits/checks, and keeps remote writes off. Do not transfer enterprise runtime data to this generic source repository or a personal machine.
+Version 0.4.0 adds Jira Server/Data Center compatibility through supported MCP tools, including legacy account names, missing annotation hints, alternate tool names and list search responses. Direct REST remains Jira Cloud only. See [integration compatibility](docs/integrations.md).
+
+Setup can save local settings without connecting to Jira. It detects Gemini capabilities, confirms the authenticated account identifier, distinguishes team/project/board, discovers active sprints when supported, validates Git without changing the checkout, configures limits/checks, and keeps remote writes off. Do not transfer enterprise runtime data to this generic source repository or a personal machine.
 
 ## CLI workflow
 

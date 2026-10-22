@@ -2,6 +2,12 @@
 
 Release checks used synthetic data only. No company service or real model account was contacted. The owner selected MIT, approved the initial private source upload and subsequently authorized public visibility after CI passed. On 2026-10-21 the GitHub API confirmed `private: false` and `visibility: public` for the [repository](https://github.com/bzlatin/gemini-sprint-orchestrator).
 
+## 0.4.0 — Jira MCP compatibility
+
+Candidate validation covers Server-shaped identity and assignee fields, known aliases without annotations, safe numeric sprint literals, list/object search responses, repeated-page and malformed-response rejection, exact local MCP server selection, and manual IDs when discovery is unavailable. A real local stdio server verifies SDK handling of missing annotations and JSON list content, include/exclude restrictions and rejection of explicitly unsafe hints. No live company Jira service was accessed.
+
+Ruff lint/format and Mypy (24 source files) passed. The focused Jira suite passed all 38 tests. The 0.4.0 wheel and sdist built; the installed wheel passed `pip check`, CLI self-test and the headless demo. The installed-wheel synthetic target harness passed initial execution, verification, read-only questions and follow-up on the same branch/worktree. Real model authentication/native resume and VS Code GUI still require target validation. The complete local suite passed: 165 tests, zero failures/errors/skips in 119.45 seconds on macOS/Python 3.13. CI results will be recorded after completion. Direct REST remains Cloud v3; deployed community servers require validation on the approved target system.
+
 ## 0.3.0 — execution isolation
 
 The release adds restricted filesystem reads/writes and clean environments for workers/checks, network-free verification, protected execution configuration, scoped editor credentials, approved read-only questions, soft disk limits and manual log retention. The runtime dependency set is unchanged.

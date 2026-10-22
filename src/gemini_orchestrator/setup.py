@@ -18,6 +18,7 @@ from .jira import Jira, JiraConnection
 from .models import (
     Check,
     GeminiSettings,
+    Identity,
     OrchestratorError,
     Profile,
     Resource,
@@ -37,11 +38,18 @@ def select_resource(
         ]
     for resource in filtered:
         console.print(f"  {resource.id}: {resource.name}")
-    default = filtered[0].id if len(filtered) == 1 else None
+    if not resources:
+        console.print(f"No {label.lower()} discovery available; enter a stable ID manually.")
+    default = filtered[0].id if len(filtered) == 1 else "manual" if not resources else None
     value = Prompt.ask(f"{label} ID (or 'manual')", default=default)
     if value == "manual":
+        identifier = ""
+        while not identifier:
+            identifier = Prompt.ask(f"Stable {label} ID").strip()
+            if not identifier:
+                console.print("A non-empty stable ID is required.")
         return Resource(
-            id=Prompt.ask(f"Stable {label} ID"),
+            id=identifier,
             name=Prompt.ask(f"{label} display name"),
             board_id=board_id,
         )
@@ -101,8 +109,58 @@ async def configure_connected_resources(profile: Profile, jira: Jira) -> None:
         profile.sprint.board_id = chosen.id
         if not Confirm.ask("Refresh sprint discovery?", default=False):
             break
-    sprint_choice = Prompt.ask("Sprint behavior", choices=["active", "manual"], default="active")
+    sprint_choice = Prompt.ask(
+        "Sprint behavior", choices=["active", "manual"], default="active" if sprints else "manual"
+    )
     profile.sprint_behavior = "manual" if sprint_choice == "manual" else "active"
+
+
+def configure_mcp_settings(profile: Profile) -> bool:
+    """Validate local settings before any optional service connection."""
+    while True:
+        value = Prompt.ask(
+            "Gemini MCP settings file (or 'later')", default=str(profile.jira.settings_path)
+        ).strip()
+        if value == "later":
+            profile.identity = Identity()
+            return False
+        path = Path(value).expanduser()
+        try:
+            cfg = json.loads(path.read_text())
+            servers = cfg.get("mcpServers") if isinstance(cfg, dict) else None
+            if not isinstance(servers, dict):
+                raise ValueError("Missing mcpServers object")
+            names = [
+                name
+                for name, server in servers.items()
+                if name.strip() and isinstance(server, dict) and server
+            ]
+            if not names:
+                raise ValueError("No configured MCP servers")
+        except (OSError, ValueError) as exc:
+            console.print(f"Settings unavailable: {exc}. Choose another file, or enter later.")
+            continue
+        console.print("Configured server names: " + ", ".join(names))
+        default = (
+            profile.jira.server
+            if profile.jira.server in names
+            else names[0]
+            if len(names) == 1
+            else None
+        )
+        while True:
+            server = (Prompt.ask("Exact Jira MCP server name", default=default) or "").strip()
+            if server in names:
+                break
+            console.print("Choose a non-empty exact server name from the list above.")
+        if path != profile.jira.settings_path or server != profile.jira.server:
+            profile.identity = Identity()
+        profile.jira.settings_path, profile.jira.server = path, server
+        profile.jira.cloud_id = Prompt.ask(
+            "Cloud ID if required by tools (leave blank for Server/Data Center)",
+            default=profile.jira.cloud_id,
+        ).strip()
+        return True
 
 
 def tooling(repository: Path) -> list[str]:
@@ -212,27 +270,16 @@ def wizard(
             console.print(
                 "MCP connectivity can contact configured services. Use this only in an approved environment."
             )
-            profile.jira.settings_path = Path(
-                Prompt.ask("Gemini MCP settings file", default=str(profile.jira.settings_path))
-            ).expanduser()
-            if Confirm.ask("Discover MCP servers now in this approved environment?", default=False):
+            configured = configure_mcp_settings(profile)
+            if configured and Confirm.ask(
+                "Discover MCP servers now in this approved environment?", default=False
+            ):
                 try:
                     console.print(Gemini(executable).servers())
                 except OrchestratorError as exc:
                     console.print(str(exc))
-            try:
-                cfg = json.loads(profile.jira.settings_path.read_text())
-                names = list(cfg.get("mcpServers", {}))
-                console.print("Configured server names: " + ", ".join(names))
-            except (OSError, ValueError):
-                console.print("Settings unavailable; configure on target system later.")
-            profile.jira.server = Prompt.ask(
-                "Exact Jira MCP server name", default=profile.jira.server
-            )
-            profile.jira.cloud_id = Prompt.ask(
-                "Cloud ID if required by tools", default=profile.jira.cloud_id
-            )
         else:
+            configured = True
             profile.jira.base_url = Prompt.ask("Jira HTTPS base URL", default=profile.jira.base_url)
             console.print(
                 "Credentials stay in environment variables; this wizard never asks for tokens."
@@ -243,7 +290,7 @@ def wizard(
             profile.jira.email_env = Prompt.ask(
                 "Email environment variable (optional for bearer)", default=profile.jira.email_env
             )
-        while Confirm.ask(
+        while configured and Confirm.ask(
             "Verify Jira identity and discover resources now? This accesses the configured service.",
             default=False,
         ):

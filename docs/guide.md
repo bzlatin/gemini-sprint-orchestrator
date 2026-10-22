@@ -53,7 +53,7 @@ Run `tmux new -s sprint`, activate the virtual environment and open the dashboar
 - No active profile: run setup, demo, or `profile switch NAME`.
 - Jira identity differs: confirm authentication on the correct approved account and rerun setup. Do not edit account IDs to impersonate someone.
 - Sprint expired: refresh resources in profile edit and confirm the correct sprint; old state remains isolated.
-- MCP read semantics missing: use a compatible server or GET-only REST fallback. Never weaken annotations or tool allowlists.
+- MCP compatibility: select the exact server name in the chosen settings file. Known read tools may omit annotation hints; unknown or explicitly unsafe tools remain blocked. Use manual stable resource IDs when discovery is unavailable. See integrations.md for Server/Data Center support.
 - Worktree collision: inspect existing branch/worktree, preserve files and select a new plan; no force reset is provided.
 - Worktree changed after verification: rerun verification and inspect a fresh review package.
 - Session already open: close the other coordinator for that profile/scope. Do not remove its lock file while it runs.

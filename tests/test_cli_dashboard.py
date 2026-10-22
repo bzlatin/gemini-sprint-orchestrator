@@ -218,3 +218,76 @@ async def test_live_logs_refresh_without_a_lifecycle_change(
             assert engine.store.row("DEMO-1")["state"] == State.IN_PROGRESS
             assert "elapsed" in str(app.query_one("#agent-text", Static).render())
             await app.action_quit()
+
+
+def test_mcp_settings_rejects_blank_unknown_and_resets_identity(
+    engine: Engine, tmp_path: Path
+) -> None:
+    from gemini_orchestrator.setup import configure_mcp_settings
+
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"mcpServers": {"jira-server": {"command": "not-launched"}}}')
+    with patch(
+        "gemini_orchestrator.setup.Prompt.ask",
+        side_effect=[str(settings), " ", "wrong", "jira-server", ""],
+    ):
+        assert configure_mcp_settings(engine.profile)
+    assert engine.profile.jira.server == "jira-server"
+    assert engine.profile.jira.settings_path == settings
+    assert engine.profile.jira.cloud_id == ""
+    assert engine.profile.identity.account_id == ""
+
+
+@pytest.mark.parametrize(
+    "contents", ["{}", "[]", '{"mcpServers": []}', '{"mcpServers": {}}', "invalid JSON"]
+)
+def test_mcp_settings_unavailable_can_defer(engine: Engine, tmp_path: Path, contents: str) -> None:
+    from gemini_orchestrator.setup import configure_mcp_settings
+
+    settings = tmp_path / "settings.json"
+    settings.write_text(contents)
+    with patch("gemini_orchestrator.setup.Prompt.ask", side_effect=[str(settings), "later"]):
+        assert not configure_mcp_settings(engine.profile)
+    assert not engine.profile.identity.account_id
+
+
+async def test_missing_discovery_defaults_to_manual_ids(engine: Engine) -> None:
+    from gemini_orchestrator.models import Identity, OrchestratorError
+
+    class ManualResources:
+        async def identity(self):
+            return Identity(account_id="server-user", display_name="Alex")
+
+        async def projects(self):
+            raise OrchestratorError("No project tool")
+
+        async def boards(self):
+            raise OrchestratorError("No board tool")
+
+        async def sprints(self, board_id):
+            raise OrchestratorError("No sprint tool")
+
+    ids = iter(["", "100", "42", "101"])
+
+    def answer(prompt, **kwargs):
+        if prompt.startswith("Stable "):
+            return next(ids)
+        if prompt.endswith("display name"):
+            return "Synthetic resource"
+        assert kwargs["default"] == "manual"
+        return kwargs["default"]
+
+    with (
+        patch("gemini_orchestrator.setup.Prompt.ask", side_effect=answer),
+        patch(
+            "gemini_orchestrator.setup.Confirm.ask",
+            side_effect=lambda prompt, **kwargs: prompt.startswith("Is this"),
+        ),
+    ):
+        await configure_connected_resources(engine.profile, ManualResources())
+    assert engine.profile.identity.account_id == "server-user"
+    assert engine.profile.projects[0].id == "100"
+    assert engine.profile.board_id == "42"
+    assert engine.profile.sprint.id == "101"
+    assert engine.profile.sprint.board_id == "42"
+    assert engine.profile.sprint_behavior == "manual"

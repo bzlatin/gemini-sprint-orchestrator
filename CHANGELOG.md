@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — Jira MCP compatibility
+
+- Added Jira Server/Data Center account-name/key normalization and common search/project tool aliases.
+- Accepted missing annotation hints only for exact known read operations; explicit unsafe hints, unknown tools and include/exclude restrictions remain enforced.
+- Rendered numeric sprint IDs as JQL literals while escaping nonnumeric values.
+- Supported list and object search results, with malformed/repeated-page rejection.
+- Validated local MCP settings and non-empty exact server selection before optional connectivity.
+- Defaulted missing resource discovery to manual stable IDs, including manual sprint behavior.
+- Direct REST remains Cloud v3; live enterprise MCP compatibility requires target validation.
+
 ## 0.3.0 — execution isolation
 
 - Sandboxed verification with network disabled, clean environments and restricted host reads; no unsafe fallback.

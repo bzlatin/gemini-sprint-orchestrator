@@ -18,7 +18,7 @@ Jira ticket descriptions, acceptance criteria, comments, source files and README
 
 ## Jira and credentials
 
-MCP tool calls use a known semantic name catalog plus explicit read-only/non-destructive annotations and schema checks. Unknown/mutating operations cannot be selected by a model. Deployment still requires least-privilege credentials and a trusted server; protocol annotations are not proof of a server's internal implementation. Incompatible identity/search semantics disable access. Managed Gemini OAuth is never scraped or silently replaced.
+MCP tool calls use an exact known read-operation catalog and schema checks. Missing annotation hints are accepted for those catalog names; explicit unsafe or malformed hints reject the tool. Include/exclude lists can only restrict access. Unknown/mutating operations cannot be selected by a model. Deployment still requires least-privilege credentials and a trusted server; protocol annotations are not proof of a server's internal implementation. Incompatible identity/search semantics disable access. Managed Gemini OAuth is never scraped or silently replaced.
 
 REST permits only allowlisted GET endpoints, verifies TLS, rejects redirects, bounds retries/pagination and retrieves credentials from environment variables. Profiles never contain token values. Avoid credential-bearing URLs or environment dumps. HTTP error messages omit response bodies that might contain sensitive data.
 

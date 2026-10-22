@@ -34,6 +34,18 @@ def quote_jql(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def account_identifier(raw: dict[str, Any]) -> str:
+    """Same canonical identity fields for authenticated users and issue assignees."""
+    return next(
+        (str(raw[key]) for key in ("accountId", "account_id", "name", "key") if raw.get(key)), ""
+    )
+
+
+def sprint_jql(value: str) -> str:
+    # Numeric IDs are literals; names remain quoted and escaped as data.
+    return str(int(value)) if re.fullmatch(r"[0-9]+", value) else quote_jql(value)
+
+
 def normalize_issue(raw: dict[str, Any], sprint: str, acceptance_field: str = "") -> Ticket:
     fields = raw.get("fields", raw)
     links = fields.get("issuelinks", [])
@@ -52,7 +64,7 @@ def normalize_issue(raw: dict[str, Any], sprint: str, acceptance_field: str = ""
         acceptance=[text(fields[acceptance_field])]
         if acceptance_field and fields.get(acceptance_field)
         else [],
-        assignee=str(assignee.get("accountId", assignee.get("name", ""))),
+        assignee=account_identifier(assignee),
         sprint_id=sprint,
         project_id=str(fields.get("project", {}).get("id", "")),
         priority=(fields.get("priority") or {}).get("name", "Medium"),
@@ -83,7 +95,7 @@ class Jira(Protocol):
 async def validate_identity(adapter: Jira, profile: Profile) -> Identity:
     identity = await adapter.identity()
     if not identity.account_id or not profile.identity.account_id:
-        raise OrchestratorError("Verify and confirm an immutable Jira account ID in setup")
+        raise OrchestratorError("Verify and confirm your Jira account identifier in setup")
     if identity.account_id != profile.identity.account_id:
         raise OrchestratorError(
             "Authenticated Jira identity differs from this profile; re-run setup, never substitute another user's tickets"
@@ -227,7 +239,7 @@ class RestJira:
             raise OrchestratorError(
                 "Configured sprint is no longer active; select the correct sprint in profile edit"
             )
-        jql = f"assignee = {quote_jql(identity.account_id)} AND sprint = {quote_jql(profile.sprint.id)}"
+        jql = f"assignee = {quote_jql(identity.account_id)} AND sprint = {sprint_jql(profile.sprint.id)}"
         result: list[Ticket] = []
         token = ""
         seen: set[str] = set()
@@ -249,14 +261,14 @@ class RestJira:
         raise OrchestratorError("Jira pagination safety limit reached")
 
 
-# Known read semantics, not a name substring heuristic. Every tool additionally needs
-# readOnlyHint=true and destructiveHint=false; unknown tools are never called.
+# Exact known read operations. Missing annotations are accepted for these names only;
+# explicit unsafe hints, unknown names and excluded tools remain blocked.
 OPERATIONS: dict[str, tuple[str, ...]] = {
     "identity": ("jira_get_current_user", "get_current_user", "atlassianUserInfo"),
-    "projects": ("jira_get_all_projects", "getVisibleJiraProjects"),
+    "projects": ("jira_get_all_projects", "getVisibleJiraProjects", "jira_get_projects"),
     "boards": ("jira_get_agile_boards", "getJiraBoards"),
     "sprints": ("jira_get_sprints_from_board", "getJiraSprints"),
-    "search": ("jira_search", "searchJiraIssuesUsingJql"),
+    "search": ("jira_search", "searchJiraIssuesUsingJql", "jira_search_issues"),
     "issue": ("jira_get_issue", "getJiraIssue"),
 }
 
@@ -286,6 +298,10 @@ class MCPTransport:
             raise OrchestratorError(
                 "Cannot read Gemini settings; choose the correct settings_path"
             ) from exc
+        if not self.profile.jira.server.strip():
+            raise OrchestratorError(
+                "Choose a non-empty exact Jira MCP server name from the selected settings file"
+            )
         cfg = settings.get("mcpServers", {}).get(self.profile.jira.server)
         if not cfg:
             raise OrchestratorError(
@@ -384,11 +400,19 @@ class MCPJira:
     async def discover(self) -> dict[str, str]:
         raw = await self.transport.list_tools()
         self.tools = {}
+        known_names = {name for names in OPERATIONS.values() for name in names}
         for tool in raw:
-            annotations = tool.get("annotations") or {}
+            annotations = tool.get("annotations")
+            if annotations is None:
+                annotations = {}
+            if not isinstance(annotations, dict):
+                continue
+            readonly = annotations.get("readOnlyHint")
+            destructive = annotations.get("destructiveHint")
             if (
-                annotations.get("readOnlyHint") is True
-                and annotations.get("destructiveHint") is False
+                tool.get("name") in known_names
+                and (readonly is None or readonly is True)
+                and (destructive is None or destructive is False)
             ):
                 self.tools[tool["name"]] = tool
         self.operations = {
@@ -398,7 +422,7 @@ class MCPJira:
         }
         if not {"identity", "search"} <= self.operations.keys():
             raise OrchestratorError(
-                "MCP access disabled: identity and search must have known read semantics plus explicit readOnlyHint=true/destructiveHint=false. Use a compatible server or the GET-only REST adapter"
+                "MCP access disabled: identity and search need exact known read-only names and no explicit unsafe annotations. Unknown, excluded and destructive tools are not permitted"
             )
         return self.operations
 
@@ -409,6 +433,8 @@ class MCPJira:
             )
         name = self.operations[operation]
         schema = self.tools[name].get("inputSchema", {"type": "object"})
+        if operation == "search" and "jql" in values and not isinstance(values["jql"], str):
+            raise OrchestratorError("JQL must be text")
         properties = schema.get("properties", {})
         aliases = {
             "board_id": "boardId",
@@ -433,9 +459,11 @@ class MCPJira:
 
     async def identity(self) -> Identity:
         raw = await self.read("identity")
+        if not isinstance(raw, dict):
+            raise OrchestratorError("Jira identity must be a structured user object")
         return Identity(
-            account_id=str(raw.get("accountId", raw.get("account_id", ""))),
-            display_name=raw.get("displayName", raw.get("name", "")),
+            account_id=account_identifier(raw),
+            display_name=str(raw.get("displayName") or raw.get("name") or ""),
             email=raw.get("emailAddress", raw.get("email")),
         )
 
@@ -475,10 +503,11 @@ class MCPJira:
                 raise OrchestratorError(
                     "Sprint is no longer active; refresh and confirm sprint selection"
                 )
-        jql = f"assignee = {quote_jql(identity.account_id)} AND sprint = {quote_jql(profile.sprint.id)}"
+        jql = f"assignee = {quote_jql(identity.account_id)} AND sprint = {sprint_jql(profile.sprint.id)}"
         result: list[Ticket] = []
         token = ""
         seen: set[str] = set()
+        previous_pages: set[str] = set()
         for page in range(1000):
             raw = await self.read(
                 "search",
@@ -489,13 +518,36 @@ class MCPJira:
                 nextPageToken=token,
                 fields="*all",
             )
-            items = raw.get("issues", [])
+            if not isinstance(raw, (dict, list)):
+                raise OrchestratorError("Jira search must return an issues object or a list")
+            items = raw if isinstance(raw, list) else raw.get("issues", [])
+            if not isinstance(items, list) or any(
+                not isinstance(item, dict) or "key" not in item for item in items
+            ):
+                raise OrchestratorError("Jira search returned an invalid issue list")
+            marker = json.dumps([item["key"] for item in items])
+            if items and marker in previous_pages:
+                raise OrchestratorError("MCP search repeated a page; refusing incomplete discovery")
+            previous_pages.add(marker)
             for item in items:
                 if "issue" in self.operations:
                     item = await self.read("issue", issue_key=item["key"], fields="*all")
                 result.append(
                     normalize_issue(item, profile.sprint.id, profile.jira.acceptance_field)
                 )
+            if isinstance(raw, list):
+                if len(items) < 50:
+                    return filter_tickets(result, profile)
+                properties = (
+                    self.tools[self.operations["search"]]
+                    .get("inputSchema", {})
+                    .get("properties", {})
+                )
+                if not {"startAt", "start_at"} & properties.keys():
+                    raise OrchestratorError(
+                        "MCP list response cannot establish complete pagination; narrow scope or use a compatible paginated server"
+                    )
+                continue
             next_token = raw.get("nextPageToken", "")
             if next_token:
                 if next_token in seen:

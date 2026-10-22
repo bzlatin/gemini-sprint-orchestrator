@@ -2,8 +2,8 @@
 
 The demo and automated tests validate the local lifecycle. They do not establish compatibility with a particular enterprise Gemini, Jira MCP, GitLab or GitHub installation.
 
-- Jira Cloud REST is supported; Jira Server/Data Center differences need a dedicated adapter. Teams are manual labels because Jira team APIs differ by deployment.
-- MCP must expose known read-only semantic names, explicit safety annotations, compatible schemas and structured JSON. Managed Gemini OAuth/extension-only/IAP connections cannot be transparently reused. Unknown tools are disabled, not guessed.
+- Jira Cloud REST is supported. Jira Server/Data Center is supported through the listed MCP schemas and identity fields; direct Server/Data Center REST is not implemented. Teams are manual labels because Jira team APIs differ by deployment.
+- MCP must expose known read-only semantic names, no explicit unsafe annotation hints, compatible schemas and structured JSON. Managed Gemini OAuth/extension-only/IAP connections cannot be transparently reused. Unknown tools are disabled, not guessed.
 - Active sprint validation requires sprint discovery; manually configured unsupported MCP resources rely on explicit human confirmation. Ticket comments embedded by Jira may be truncated; full comment pagination is not implemented.
 - Worker tool restrictions intentionally prevent shell/MCP/custom-agent use. Python runs approved verification commands separately. Gemini versions needing unrestricted cache/auth writes may fail under OS confinement; target-system validation is required.
 - Declared issue dependencies and overlapping declared paths inform deterministic scheduling. Full semantic repository conflict detection is advisory, not proof that independent workers cannot conflict. There is no automatic merge of divergent prerequisites.

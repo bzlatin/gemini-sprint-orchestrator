@@ -7,7 +7,15 @@ import pytest
 
 from gemini_orchestrator.demo import demo_tickets
 from gemini_orchestrator.engine import Engine
-from gemini_orchestrator.jira import MCPJira, RestJira, filter_tickets, normalize_issue, quote_jql
+from gemini_orchestrator.jira import (
+    MCPJira,
+    MCPTransport,
+    RestJira,
+    filter_tickets,
+    normalize_issue,
+    quote_jql,
+    sprint_jql,
+)
 from gemini_orchestrator.models import OrchestratorError
 
 
@@ -104,19 +112,114 @@ async def test_mcp_capabilities_pagination_identity_and_filtering(engine: Engine
 @pytest.mark.parametrize(
     "annotations",
     [
-        {},
         {"readOnlyHint": False, "destructiveHint": False},
-        {"readOnlyHint": True},
         {"readOnlyHint": True, "destructiveHint": True},
+        {"readOnlyHint": "true"},
+        {"destructiveHint": 0},
+        "invalid",
     ],
 )
-async def test_mcp_without_enforceable_read_semantics_disabled(annotations: dict[str, Any]) -> None:
+async def test_mcp_explicit_unsafe_or_malformed_annotations_disabled(annotations: Any) -> None:
     transport = FakeMCP()
     transport.tools[0]["annotations"] = annotations
     adapter = MCPJira(transport)
     with pytest.raises(OrchestratorError, match="disabled"):
         await adapter.discover()
     assert not transport.calls
+
+
+@pytest.mark.parametrize(
+    "annotations", [None, {}, {"readOnlyHint": True}, {"destructiveHint": False}]
+)
+async def test_known_read_tools_allow_missing_annotation_hints(annotations: Any) -> None:
+    transport = FakeMCP()
+    for tool in transport.tools:
+        tool["annotations"] = annotations
+    adapter = MCPJira(transport)
+    assert await adapter.discover() == {
+        "identity": "jira_get_current_user",
+        "search": "jira_search",
+    }
+    assert "jira_delete_issue" not in adapter.tools
+    assert (await adapter.identity()).account_id == "demo-alex"
+
+
+@pytest.mark.parametrize("field", ["accountId", "account_id", "name", "key"])
+@pytest.mark.parametrize("as_list", [True, False])
+async def test_server_identity_search_aliases_and_payloads(
+    engine: Engine, field: str, as_list: bool
+) -> None:
+    class ServerMCP(FakeMCP):
+        async def call(self, name: str, arguments: dict[str, Any]) -> Any:
+            self.calls.append((name, arguments))
+            if name == "get_current_user":
+                return {"accountId": "", field: "demo-alex", "displayName": "Alex"}
+            if name == "jira_get_projects":
+                return [{"id": "100", "name": "Synthetic"}]
+            assert name == "jira_search_issues"
+            assert arguments["jql"] == 'assignee = "demo-alex" AND sprint = 101'
+            items = [issue(), issue("DEMO-2", "other"), issue("DEMO-3", completed=True)]
+            for item in items:
+                item["fields"]["assignee"] = {field: item["fields"]["assignee"]["accountId"]}
+            return items if as_list else {"issues": items}
+
+    transport = ServerMCP()
+    transport.tools[0]["name"] = "get_current_user"
+    transport.tools[1]["name"] = "jira_search_issues"
+    transport.tools.append(
+        {"name": "jira_get_projects", "inputSchema": {"type": "object", "properties": {}}}
+    )
+    for tool in transport.tools:
+        tool.pop("annotations", None)
+    adapter = MCPJira(transport)
+    await adapter.discover()
+    assert (await adapter.identity()).account_id == "demo-alex"
+    assert (await adapter.projects())[0].id == "100"
+    assert [ticket.key for ticket in await adapter.issues(engine.profile)] == ["DEMO-1"]
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("123", "123"),
+        ("00123", "123"),
+        ("Sprint 1", '"Sprint 1"'),
+        ('123" OR sprint != "', '"123\\" OR sprint != \\""'),
+    ],
+)
+def test_sprint_literals_are_numeric_or_safely_quoted(value: str, expected: str) -> None:
+    assert sprint_jql(value) == expected
+
+
+@pytest.mark.parametrize("offset_supported", [True, False])
+async def test_list_search_cannot_silently_repeat_or_truncate(
+    engine: Engine, offset_supported: bool
+) -> None:
+    class RepeatedPage(FakeMCP):
+        async def call(self, name: str, arguments: dict[str, Any]) -> Any:
+            if name == "jira_get_current_user":
+                return {"name": "demo-alex"}
+            return [issue(f"DEMO-{i}") for i in range(1, 51)]
+
+    transport = RepeatedPage()
+    if not offset_supported:
+        transport.tools[1]["inputSchema"]["properties"].pop("start_at")
+    adapter = MCPJira(transport)
+    await adapter.discover()
+    with pytest.raises(OrchestratorError, match="repeated|complete pagination"):
+        await adapter.issues(engine.profile)
+
+
+@pytest.mark.parametrize("payload", ["not JSON data", {"issues": {}}, ["invalid issue"]])
+async def test_malformed_search_response_rejected(engine: Engine, payload: Any) -> None:
+    class Malformed(FakeMCP):
+        async def call(self, name: str, arguments: dict[str, Any]) -> Any:
+            return {"name": "demo-alex"} if name == "jira_get_current_user" else payload
+
+    adapter = MCPJira(Malformed())
+    await adapter.discover()
+    with pytest.raises(OrchestratorError, match="search"):
+        await adapter.issues(engine.profile)
 
 
 async def test_mcp_mismatched_identity_never_searches(engine: Engine) -> None:
@@ -277,3 +380,77 @@ server.run(transport="stdio")
         tickets = await jira.issues(profile)
         assert len(tickets) == 1
         assert tickets[0].summary == "Synthetic MCP issue"
+
+
+async def test_legacy_server_over_real_stdio_with_tool_filters(engine: Engine, tmp_path) -> None:
+    import json
+    import sys
+
+    from gemini_orchestrator.jira import JiraConnection
+
+    server = tmp_path / "legacy_mcp.py"
+    server.write_text("""import json
+from mcp.server.fastmcp import FastMCP
+server = FastMCP("Synthetic legacy Jira")
+@server.tool()
+def get_current_user() -> dict:
+    return {"name": "demo-alex", "displayName": "Synthetic Alex"}
+@server.tool(structured_output=False)
+def jira_search_issues(jql: str, start_at: int = 0, max_results: int = 50) -> str:
+    assert jql == 'assignee = "demo-alex" AND sprint = 101'
+    return json.dumps([{"key": "DEMO-1", "fields": {"summary": "Legacy list result", "assignee": {"name": "demo-alex"}, "project": {"id": "100"}}}])
+@server.tool()
+def jira_delete_issue() -> dict:
+    raise AssertionError("Unknown tools must never run")
+@server.tool()
+def jira_get_projects() -> dict:
+    raise AssertionError("Excluded tools must never run")
+server.run(transport="stdio")
+""")
+    settings = tmp_path / "settings.json"
+    settings.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "legacy": {
+                        "command": sys.executable,
+                        "args": [str(server)],
+                        "includeTools": [
+                            "get_current_user",
+                            "jira_search_issues",
+                            "jira_delete_issue",
+                            "jira_get_projects",
+                        ],
+                        "excludeTools": ["jira_get_projects"],
+                    }
+                }
+            }
+        )
+    )
+    profile = engine.profile.model_copy(deep=True)
+    profile.mode = "connected"
+    profile.jira.settings_path = settings
+    profile.jira.server = "legacy"
+    async with JiraConnection(profile) as jira:
+        assert isinstance(jira, MCPJira)
+        assert set(jira.operations) == {"identity", "search"}
+        assert (await jira.issues(profile))[0].summary == "Legacy list result"
+    # includeTools narrows the catalog and cannot bypass explicit unsafe hints.
+    server.write_text(
+        server.read_text().replace(
+            "@server.tool()\ndef get_current_user",
+            '@server.tool(annotations={"readOnlyHint": False})\ndef get_current_user',
+        )
+    )
+    with pytest.raises(OrchestratorError, match="disabled"):
+        async with JiraConnection(profile):
+            pytest.fail("Explicit unsafe hints must not be overridden by includeTools")
+
+
+async def test_blank_mcp_server_rejected_before_launch(engine: Engine, tmp_path) -> None:
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"mcpServers": {"": {"command": "must-not-run"}}}')
+    engine.profile.jira.settings_path = settings
+    engine.profile.jira.server = " "
+    with pytest.raises(OrchestratorError, match="non-empty"):
+        await MCPTransport(engine.profile).connect()
