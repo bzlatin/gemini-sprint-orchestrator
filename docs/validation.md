@@ -19,7 +19,11 @@ The extension adds exact-worktree editor opening and the same supervised convers
 | Failure/pause | Startup errors visible in chat; pausing verification or one batch member preserves work and supervision |
 | Interface review | Both listed material fixes scored resolved; ship at that two-fix-list scope |
 | Package and installed-wheel workflow | Wheel/sdist 0.2.0 built; installed site-packages copy passed pip check, CLI self-test and the complete shared-session walkthrough |
-| GitHub Actions | New feature matrix pending upload |
+| GitHub Actions / macOS Python 3.11 and 3.13 | 116 passed on each; static checks, CLI self-test and build passed |
+| GitHub Actions / Ubuntu Python 3.11 and 3.13 | 113 passed, 3 platform skips on each; static checks, CLI self-test and build passed |
+| GitHub Actions / security | Dependency audit and offline secret scan passed |
+
+The complete [0.2.0 CI run](https://github.com/bzlatin/gemini-sprint-orchestrator/actions/runs/39707440075) passed all five jobs for commit `784bfd16dffe03772cbaa8526c4b649c863f370f`. Its test artifacts confirm the counts above. The three Linux skips require a supported OS sandbox; the macOS jobs ran those tests successfully.
 
 [Walkthrough evidence](demo/sessions/README.md) distinguishes the real Textual applications from the stubbed VS Code GUI launch. VS Code is not installed on this development machine. The Gemini executable in the connected test is synthetic: no real provider account, credentials or company service were used. Actual VS Code/Remote SSH and native provider auth/history behavior remain target-system checks. Runtime dependencies are unchanged from the previously audited pinned set; the inventory root version is updated to 0.2.0.
 
