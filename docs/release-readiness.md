@@ -17,8 +17,8 @@ This release is prepared for public evaluation of the local application and synt
 | Prior CI | [0.2.0 validation](https://github.com/bzlatin/gemini-sprint-orchestrator/actions/runs/39707440075) passed all five jobs: macOS 116 passed; Ubuntu 113 passed / 3 platform skips, on Python 3.11 and 3.13 |
 | Prior isolation CI | [0.3.0 validation](https://github.com/bzlatin/gemini-sprint-orchestrator/actions/runs/39779803913) passed all five jobs; 134 tests, zero skips on macOS/Ubuntu and Python 3.11/3.13 |
 | Jira MCP compatibility | Exact known read tools may omit hints; explicit unsafe/unknown tools blocked; Server identities, numeric sprint IDs, list results and manual discovery fallback covered with synthetic tests |
-| Current CI | 0.4.0 validation pending |
-| Package | Final wheel/sdist built; installed-wheel self-test, shared-session walkthrough and synthetic target harness passed |
+| Current CI | [0.4.0 validation](https://github.com/bzlatin/gemini-sprint-orchestrator/actions/runs/39843771312) passed all five jobs; 165 tests, zero skips on each macOS/Ubuntu and Python 3.11/3.13 combination |
+| Package | 0.4.0 wheel/sdist built; installed-wheel dependency check, self-test, headless demo and synthetic target harness passed; full source UI/session suite passed |
 
 The public-use entry point is the synthetic demo. Before connecting company repositories, validate the actual Gemini version, auth/cache writes, MCP identity/search safety, sprint scope, sandbox behavior and hosting credentials on the approved work system. The OS policy restricts reads and writes; the trusted Gemini process retains approved provider access. Verification runs with a clean environment, scoped filesystem and network denied.
 
