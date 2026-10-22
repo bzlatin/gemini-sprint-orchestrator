@@ -218,6 +218,7 @@ def wrap(
             return " ".join(f"(subpath {json.dumps(str(p.resolve()))})" for p in paths)
 
         policy = '(version 1)\n(allow default)\n(deny file-read* file-write*)\n(allow file-read-metadata)\n(allow file-read-data (literal "/"))\n'
+        policy += '(deny process-info*)\n(allow process-info* (target self))\n(deny sysctl-read (sysctl-name "kern.procargs") (sysctl-name "kern.procargs2") (sysctl-name "kern.proc.all"))\n'
         policy += f'(allow file-read* {clauses(reads)})\n(allow file-write* {clauses(writes)} (literal "/dev/null"))\n'
         if not worker:
             policy += "(deny network*)\n(deny mach-lookup)\n"

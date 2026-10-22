@@ -4,7 +4,7 @@ Workers, read-only model questions, advisory analysis and verification now use f
 
 ## Files, environment and configuration
 
-Verification can write only its assigned worktree and dedicated scratch home. It has no network access; on macOS Mach service lookup is also denied. Workers retain network access for the approved model provider, with a local read/edit tool allowlist. Questions have both a read-only tool policy and OS write denial for the worktree. Advisory analysis denies every model tool and mounts the source read-only.
+Verification can persist host writes only in its assigned worktree and dedicated scratch home. Linux also supplies an ephemeral private `/tmp`, which is not the host temporary filesystem. It has no network access; on macOS Mach service lookup and other-process inspection are also denied. Workers retain network access for the approved model provider, with a local read/edit tool allowlist. Questions have both a read-only tool policy and OS write denial for the worktree. Advisory analysis denies every model tool and mounts the source read-only.
 
 The host home, controller databases, bridge credentials, other worktrees, SSH agents and arbitrary shell environment variables are excluded. Standard OS tooling, the application's Python environment and resolved Node installation are readable; macOS linked libraries outside those roots are granted as individual files. These tool installations must be trusted and separate from runtime data. Explicit additional toolchain paths can be configured through `isolation.tool_read_paths`; exposing controller/worktree roots is refused. Generic `python`/`python3` checks use the application's Python interpreter; use an explicit executable path for another installed version.
 

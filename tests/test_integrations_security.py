@@ -204,7 +204,7 @@ def test_os_sandbox_enforces_write_boundary(engine: Engine, tmp_path: Path) -> N
         pytest.skip("Supported OS sandbox is unavailable")
     allowed = engine.profile.repository / "allowed.txt"
     denied = tmp_path / "outside.txt"
-    script = f"from pathlib import Path; Path({str(allowed)!r}).write_text('allowed'); Path({str(denied)!r}).write_text('denied')"
+    script = f"from pathlib import Path; Path({str(allowed)!r}).write_text('allowed')\ntry: Path({str(denied)!r}).write_text('denied')\nexcept OSError: pass"
     argv, env = wrap(
         engine.profile,
         [sys.executable, "-c", script],
@@ -218,7 +218,7 @@ def test_os_sandbox_enforces_write_boundary(engine: Engine, tmp_path: Path) -> N
     )
     if "sandbox_apply: Operation not permitted" in result.stderr:
         pytest.skip("Host sandbox cannot nest sandbox-exec")
-    assert result.returncode != 0
+    assert result.returncode == 0, result.stderr
     assert allowed.read_text() == "allowed"
     assert not denied.exists()
 

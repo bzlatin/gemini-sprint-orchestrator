@@ -258,7 +258,7 @@ else:
         assert 'write_file' not in policy.read_text() and 'replace' not in policy.read_text()
         assert '--resume' not in sys.argv
         try: Path('question-modified-source').write_text('bad'); raise AssertionError('write allowed')
-        except PermissionError: pass
+        except OSError: pass
         print(json.dumps({{'response':'Read-only synthetic answer'}}))
     else:
         Path('implementation.txt').write_text('synthetic implementation')
@@ -372,3 +372,25 @@ def test_central_settings_are_never_silently_replaced() -> None:
     ):
         with pytest.raises(OrchestratorError, match="organization controls"):
             Gemini().assert_supplemental_policy()
+
+
+def test_verification_cannot_read_host_process_environment(engine: Engine) -> None:
+    host = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(20)"],
+        env={**os.environ, "GSO_PRIVATE_CANARY": "synthetic-host-process-canary"},
+    )
+    try:
+        result = isolated(
+            engine,
+            f"""import subprocess,json
+try:
+    r=subprocess.run(['/bin/ps','eww','-p',{str(host.pid)!r}],capture_output=True,text=True)
+    visible='synthetic-host-process-canary' in r.stdout
+except OSError: visible=False
+print(json.dumps({{'host_environment_visible':visible}}))
+""",
+        )
+        assert result == {"host_environment_visible": False}
+    finally:
+        host.terminate()
+        host.wait(timeout=5)

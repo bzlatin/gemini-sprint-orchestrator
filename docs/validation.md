@@ -9,7 +9,7 @@ The release adds restricted filesystem reads/writes and clean environments for w
 | Check | Actual result |
 |---|---|
 | Local regression suite | 133 passed in 119.09 seconds; macOS / Python 3.13 |
-| macOS process boundaries | Real synthetic processes denied controller/sibling-worktree/symlink reads, localhost networking in checks, and question-mode source writes |
+| macOS process boundaries | Real synthetic processes denied controller/sibling-worktree/symlink reads, localhost networking in checks, question-mode source writes and host-process environment inspection |
 | Configuration and credentials | Editor execution configuration refused; worker configuration writes denied; wrong-ticket and stale-generation credentials rejected |
 | Question continuity | Synthetic connected CLI used a separate read-only tool policy, did not resume coding, and preserved implementation evidence |
 | Disk controls | Oversized process stopped; symlink/current logs excluded from retention candidates |

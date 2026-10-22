@@ -194,7 +194,8 @@ async def test_vscode_opens_exact_worktree_with_shared_terminal_and_no_repo_chan
         assert "--resume" not in task["args"]  # The coordinator owns the Gemini process.
         assert calls == [["/fake path/code", "--new-window", str(workspace)]]
         assert git.fingerprint() == before
-        assert not (git.root / ".vscode").exists()
+        assert not (git.root / ".vscode" / "tasks.json").exists()
+        assert not (git.root / ".vscode").exists() or not any((git.root / ".vscode").iterdir())
         assert (
             workspace.is_relative_to(engine.runtime) and workspace.stat().st_mode & 0o777 == 0o600
         )

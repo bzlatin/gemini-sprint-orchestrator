@@ -42,7 +42,7 @@ jobs:
           python - <<'PY'
           import xml.etree.ElementTree as ET
           root = ET.parse('test-results.xml')
-          required = {'test_os_sandbox_enforces_write_boundary', 'test_real_connected_worker_with_synthetic_cli', 'test_native_gemini_session_id_is_resumed_exactly', 'test_verification_cannot_read_controller_or_send_network', 'test_worker_cannot_read_bridge_or_other_worktree', 'test_read_only_question_has_os_write_denial', 'test_connected_read_only_question_uses_separate_policy'}
+          required = {'test_os_sandbox_enforces_write_boundary', 'test_real_connected_worker_with_synthetic_cli', 'test_native_gemini_session_id_is_resumed_exactly', 'test_verification_cannot_read_controller_or_send_network', 'test_worker_cannot_read_bridge_or_other_worktree', 'test_read_only_question_has_os_write_denial', 'test_connected_read_only_question_uses_separate_policy', 'test_verification_cannot_read_host_process_environment'}
           cases = {c.get('name'): c for c in root.iter('testcase') if c.get('name') in required}
           assert set(cases) == required
           assert all(c.find('skipped') is None for c in cases.values()), 'Required sandbox tests were skipped'
