@@ -16,7 +16,7 @@ from rich.table import Table
 from .config import Profiles
 from .dashboard import Dashboard
 from .demo import create_demo
-from .engine import Engine
+from .engine import Engine, profile_scope
 from .hosting import perform_draft, perform_push, remote_fingerprint, remote_preview
 from .jira import JiraConnection, validate_identity
 from .models import OrchestratorError, Profile
@@ -250,6 +250,25 @@ def status(ctx: typer.Context) -> None:
     """Show persisted task states and regenerate the Markdown board."""
     with session(ctx) as engine:
         show_status(engine)
+
+
+@app.command("session")
+def worker_session(ctx: typer.Context, key: str) -> None:
+    """Open a shared worker conversation while its main dashboard is running."""
+    from .session_ui import SessionConsole
+
+    profile = configured(ctx)
+    descriptor = (
+        registry(ctx).runtime(profile.name)
+        / "sessions"
+        / profile_scope(profile)
+        / "conversation-bridge.json"
+    )
+    if not descriptor.is_file():
+        raise OrchestratorError(
+            "Start the demo or connected dashboard first, then open its worker session"
+        )
+    SessionConsole(descriptor, key.strip().upper()).run()
 
 
 @app.command()

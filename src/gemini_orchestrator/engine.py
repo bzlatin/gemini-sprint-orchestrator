@@ -22,19 +22,24 @@ from .process import Supervisor
 from .store import Store
 
 
+def profile_scope(profile: Profile) -> str:
+    """Stable local runtime scope, also used by clients that do not own the engine lock."""
+    return digest(
+        {
+            "mode": profile.mode,
+            "identity": profile.identity.account_id,
+            "repository": str(profile.repository),
+            "board": profile.board_id,
+            "sprint": profile.sprint.id if profile.sprint else None,
+        }
+    )[:16]
+
+
 class Engine:
     def __init__(self, profile: Profile, runtime: Path):
         self.profile = profile
         # Changing Jira identity, sprint, board or checkout creates a separate state scope.
-        scope = digest(
-            {
-                "mode": profile.mode,
-                "identity": profile.identity.account_id,
-                "repository": str(profile.repository),
-                "board": profile.board_id,
-                "sprint": profile.sprint.id if profile.sprint else None,
-            }
-        )[:16]
+        scope = profile_scope(profile)
         from .config import private_dir
 
         runtime = private_dir(runtime / "sessions" / scope)
@@ -370,7 +375,8 @@ class Engine:
                     self.tasks[key] = task
                     tasks.append(task)
                 if tasks:
-                    await asyncio.gather(*tasks)
+                    # Pausing one worker must not abandon supervision of the rest of its batch.
+                    await asyncio.gather(*tasks, return_exceptions=True)
                 self.tasks.clear()
         finally:
             self.executing = False
@@ -434,6 +440,17 @@ class Engine:
             self.store.transition(key, State.IN_PROGRESS)
             ticket = self.store.ticket(key)
             feedback = json.loads(self.store.row(key)["feedback"])
+            session_id = self.worker_session_id(key)
+            if not self.conversation(key):
+                self.store.run_record(
+                    key,
+                    "conversation",
+                    {
+                        "role": "user",
+                        "text": f"Implement {key}: {ticket.summary}\n"
+                        + "\n".join(ticket.acceptance),
+                    },
+                )
             for attempt in range(self.profile.gemini.retries + 1):
                 if self.profile.mode == "demo":
                     # Genuine subprocesses exercise the same monitor, timeout and cancellation path.
@@ -458,6 +475,8 @@ class Engine:
                         git.root,
                         self.runtime,
                         feedback,
+                        session_id=session_id,
+                        conversation=self.conversation(key),
                     )
                 log = self.runtime / "logs" / f"{key}-worker-{uuid.uuid4().hex[:12]}-{attempt}.log"
                 started = datetime.now(UTC).isoformat()
@@ -468,13 +487,19 @@ class Engine:
                     log_path: Path = log,
                     started_at: str = started,
                     try_number: int = attempt + 1,
+                    native_id: str = session_id,
                 ) -> None:
                     self.store.patch(
                         key,
                         pid=pid,
                         process_token=token,
                         result=json.dumps(
-                            {"log": str(log_path), "started_at": started_at, "attempt": try_number}
+                            {
+                                "log": str(log_path),
+                                "started_at": started_at,
+                                "attempt": try_number,
+                                "session_id": native_id,
+                            }
                         ),
                     )
 
@@ -488,17 +513,36 @@ class Engine:
                     prompt,
                 )
                 result["started_at"] = started
+                result["session_id"] = session_id
                 if self.profile.mode == "connected" and result["passed"]:
                     try:
                         output = json.loads(log.read_text())
                         if output.get("error") or not isinstance(output.get("response"), str):
                             raise ValueError("Missing response or Gemini error")
                         result["summary"] = output["response"]
+                        returned_id = output.get("session_id", "")
+                        if returned_id:
+                            returned_id = str(uuid.UUID(returned_id))
+                            if session_id and returned_id != session_id:
+                                raise ValueError("Gemini resumed a different session")
+                            session_id = returned_id
+                            result["session_id"] = session_id
                     except (ValueError, OSError) as exc:
                         result["passed"] = False
                         result["failure"] = f"Invalid structured Gemini result: {exc}"
+                if self.profile.mode == "demo" and result["passed"]:
+                    result["summary"] = "Synthetic worker completed in the same worktree." + (
+                        f" Follow-up: {feedback[-1]}"
+                        if feedback
+                        else " Inspect its implementation and verification before accepting."
+                    )
                 self.store.run_record(key, "worker", result)
                 if result["passed"]:
+                    self.store.run_record(
+                        key,
+                        "conversation",
+                        {"role": "assistant", "text": str(result["summary"])[:32000]},
+                    )
                     break
                 self.store.event(
                     f"Worker attempt {attempt + 1} failed; bounded retry limit {self.profile.gemini.retries}",
@@ -506,6 +550,17 @@ class Engine:
                 )
             self.store.patch(key, pid=None, result=json.dumps(result))
             if not result["passed"]:
+                self.store.run_record(
+                    key,
+                    "conversation",
+                    {
+                        "role": "system",
+                        "text": str(
+                            result.get("failure")
+                            or "Worker failed or timed out. Inspect the log before retrying."
+                        ),
+                    },
+                )
                 self.store.transition(key, State.FAILED)
                 return
             self.store.transition(key, State.VERIFYING)
@@ -519,6 +574,7 @@ class Engine:
         except Exception as exc:
             row = self.store.row(key)
             self.store.event(str(exc), key)
+            self.store.run_record(key, "conversation", {"role": "system", "text": str(exc)[:8000]})
             if row["state"] in {State.IN_PROGRESS, State.VERIFYING}:
                 self.store.transition(key, State.FAILED)
             elif row["state"] == State.QUEUED:
@@ -526,6 +582,186 @@ class Engine:
             self.store.patch(key, pid=None)
         finally:
             self.board()
+
+    def conversation(self, key: str) -> list[dict[str, Any]]:
+        self.store.ticket(key)
+        records = self.store.db.execute(
+            "SELECT id,data,created FROM runs WHERE ticket=? AND kind='conversation' ORDER BY id DESC LIMIT 100",
+            (key,),
+        ).fetchall()
+        recent = []
+        remaining = 60000
+        for row in records:
+            item = json.loads(row["data"])
+            text = str(item["text"])[-min(16000, remaining) :]
+            recent.append({**item, "text": text, "id": row["id"], "created": row["created"]})
+            remaining -= len(text)
+            if remaining <= 0:
+                break
+        return list(reversed(recent))
+
+    def worker_session_id(self, key: str) -> str:
+        result = json.loads(self.store.row(key)["result"] or "{}")
+        if result.get("session_id"):
+            return str(uuid.UUID(result["session_id"]))
+        records = self.store.db.execute(
+            "SELECT data FROM runs WHERE ticket=? AND kind='worker' ORDER BY id DESC LIMIT 100",
+            (key,),
+        )
+        for record in records:
+            value = json.loads(record[0]).get("session_id")
+            if value:
+                return str(uuid.UUID(value))
+        return ""
+
+    def session_snapshot(self, key: str) -> dict[str, Any]:
+        row = self.store.row(key)
+        if not row["worktree"]:
+            raise OrchestratorError(
+                "This ticket has no worker worktree yet; approve and launch it first"
+            )
+        git = self.validate_worktree(row)
+        worker = json.loads(row["result"] or "{}")
+        recent = ""
+        log = Path(worker["log"]) if worker.get("log") else None
+        if (
+            log
+            and not log.is_symlink()
+            and log.is_file()
+            and log.parent.resolve() == (self.runtime / "logs").resolve()
+        ):
+            with log.open("rb") as stream:
+                stream.seek(max(0, log.stat().st_size - 3000))
+                recent = stream.read().decode(errors="replace")
+        return {
+            "key": key,
+            "summary": self.store.ticket(key).summary,
+            "state": row["state"],
+            "branch": row["branch"],
+            "worktree": str(git.root),
+            "session_id": self.worker_session_id(key),
+            "mode": self.profile.mode,
+            "messages": self.conversation(key),
+            "recent_log": recent,
+            "busy": self.executing or bool(self.supervisor.running),
+            "can_pause": row["state"] in {State.IN_PROGRESS, State.VERIFYING} and key in self.tasks,
+            "verification": json.loads(row["verification"] or "{}"),
+        }
+
+    def session_plan(self, key: str) -> Plan:
+        row = self.store.row(key)
+        # Follow-ups reuse a previously human-approved ticket scope, never an unapproved plan.
+        for record in self.store.db.execute(
+            "SELECT p.data FROM plans p WHERE EXISTS (SELECT 1 FROM approvals a WHERE a.action='plan' AND a.subject=p.id AND a.granted=1) ORDER BY p.rowid DESC"
+        ):
+            plan = Plan.model_validate_json(record[0])
+            if (
+                plan.config_hash == digest(self.profile)
+                and plan.tickets.get(key) == digest(self.store.ticket(key))
+                and plan.branches.get(key) == row["branch"]
+            ):
+                return plan
+        raise OrchestratorError(
+            "Ticket or settings changed, or no approved scope exists. Generate and approve a fresh plan first"
+        )
+
+    def session_preview(self, key: str, message: str) -> dict[str, Any]:
+        if not message.strip() or len(message) > 8000 or "\x00" in message:
+            raise OrchestratorError("Enter a message between 1 and 8000 characters")
+        if self.executing or self.supervisor.running or self.tasks:
+            raise OrchestratorError(
+                "Wait for the current batch to finish, or pause its workers, before sending a follow-up"
+            )
+        row = self.store.row(key)
+        if row["state"] not in {
+            State.READY_FOR_REVIEW,
+            State.CHANGES_REQUESTED,
+            State.APPROVED,
+            State.MR_READY,
+            State.PAUSED,
+            State.INTERRUPTED,
+            State.FAILED,
+            State.CANCELLED,
+        }:
+            raise OrchestratorError(
+                "Choose a completed or paused worker session before sending a follow-up"
+            )
+        git = self.validate_worktree(row)
+        plan = self.session_plan(key)
+        expected_base = self.prerequisite_base(key, plan)
+        if not Git(self.profile.repository).ancestor(expected_base, git.run("rev-parse", "HEAD")):
+            raise OrchestratorError(
+                "Prerequisites changed; integrate them and approve a fresh plan first"
+            )
+        return {
+            "key": key,
+            "message": message.strip(),
+            "history": digest(row["feedback"]),
+            "turn": self.store.db.execute(
+                "SELECT COALESCE(MAX(id),0) FROM runs WHERE ticket=? AND kind='worker'", (key,)
+            ).fetchone()[0],
+            "state": row["state"],
+            "branch": row["branch"],
+            "worktree": str(git.root),
+            "tree": git.fingerprint(),
+            "session_id": self.worker_session_id(key),
+            "plan": plan.id,
+            "scope": plan.fingerprint,
+            "config": digest(self.profile),
+            "checks": [check.model_dump() for check in self.profile.checks],
+        }
+
+    def approve_session_turn(self, key: str, message: str, actor: str, fingerprint: str) -> None:
+        if digest(self.session_preview(key, message)) != fingerprint:
+            raise OrchestratorError("Session context changed; preview the follow-up again")
+        self.store.grant(self.store.request("session-turn", key, fingerprint), actor)
+
+    def launch_session_turn(
+        self, key: str, message: str, *, connected_enabled: bool = False
+    ) -> asyncio.Task[None]:
+        if self.profile.mode == "connected" and not connected_enabled:
+            raise OrchestratorError(
+                "Connected session messages require --enable-connected in an approved environment"
+            )
+        preview = self.session_preview(key, message)
+        self.store.require("session-turn", key, digest(preview), consume=True)
+        actor = self.profile.display_name
+        plan = self.session_plan(key)
+        with self.store.transaction():
+            if self.store.row(key)["state"] in {
+                State.READY_FOR_REVIEW,
+                State.APPROVED,
+                State.MR_READY,
+            }:
+                self.feedback(key, preview["message"], actor)
+            else:
+                history = json.loads(self.store.row(key)["feedback"])
+                history.append(f"{actor}: {preview['message']}")
+                self.store.patch(key, feedback=json.dumps(history))
+                self.invalidate_descendants(self.descendants(key))
+            self.store.db.execute(
+                "UPDATE approvals SET consumed=1 WHERE subject=? OR action='launch'", (key,)
+            )
+            self.store.patch(key, verification=None)
+            self.store.transition(key, State.QUEUED)
+            self.store.run_record(key, "conversation", {"role": "user", "text": preview["message"]})
+            self.store.event(
+                "Human approved session follow-up; prior implementation acceptance invalidated", key
+            )
+        self.executing = True
+
+        async def turn() -> None:
+            try:
+                await self.run_ticket(key, plan)
+            finally:
+                self.executing = False
+                self.tasks.pop(key, None)
+                self.board()
+
+        task = asyncio.create_task(turn())
+        self.tasks[key] = task
+        self.board()
+        return task
 
     def verification_fingerprint(self, key: str) -> str:
         row = self.store.row(key)
@@ -677,9 +913,7 @@ class Engine:
         self.store.patch(key, result=json.dumps(result))
         self.board()
 
-    def feedback(self, key: str, message: str, actor: str) -> None:
-        if not message.strip() or not actor.strip():
-            raise OrchestratorError("Provide human feedback before requesting changes")
+    def descendants(self, key: str) -> set[str]:
         descendants: set[str] = set()
         changed = {key}
         while changed:
@@ -694,6 +928,25 @@ class Engine:
             )
             descendants |= next_changed
             changed = next_changed
+        return descendants
+
+    def invalidate_descendants(self, descendants: set[str]) -> None:
+        for row in self.store.rows():
+            if row["key"] in descendants and row["state"] in {
+                State.APPROVED,
+                State.MR_READY,
+                State.READY_FOR_REVIEW,
+            }:
+                self.store.transition(row["key"], State.CHANGES_REQUESTED)
+                self.store.patch(row["key"], verification=None)
+                self.store.event(
+                    "Prerequisite changed; revalidate downstream implementation", row["key"]
+                )
+
+    def feedback(self, key: str, message: str, actor: str) -> None:
+        if not message.strip() or not actor.strip():
+            raise OrchestratorError("Provide human feedback before requesting changes")
+        descendants = self.descendants(key)
         if any(
             self.store.row(dep)["state"] in {State.IN_PROGRESS, State.VERIFYING}
             for dep in descendants
@@ -709,17 +962,7 @@ class Engine:
             "UPDATE approvals SET consumed=1 WHERE subject=? OR action='launch'", (key,)
         )
         # All already-created descendants need fresh verification/review after prerequisite changes.
-        for row in self.store.rows():
-            if row["key"] in descendants and row["state"] in {
-                State.APPROVED,
-                State.MR_READY,
-                State.READY_FOR_REVIEW,
-            }:
-                self.store.transition(row["key"], State.CHANGES_REQUESTED)
-                self.store.patch(row["key"], verification=None)
-                self.store.event(
-                    "Prerequisite changed; revalidate downstream implementation", row["key"]
-                )
+        self.invalidate_descendants(descendants)
         self.board()
 
     async def cancel(self, key: str, *, pause: bool = False) -> None:

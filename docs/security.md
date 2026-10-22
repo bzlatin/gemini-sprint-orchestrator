@@ -29,3 +29,11 @@ Configuration, SQLite, logs, review packages, worktree paths and TASK_BOARD.md m
 Atomic writes prevent partial dashboards/configuration. WAL-backed transactions preserve transitions. Advisory locks prevent duplicate supervision. Guardian processes terminate child groups when the parent disappears. Recovery never assumes a saved PID still belongs to a live worker and never kills an unrelated process from a stale PID.
 
 There is no telemetry service. External traffic is limited to explicitly enabled integrations/model execution, installation and owner-approved publication. Process logs are local and capped at 8 MiB each; there is no automatic historical retention/rotation; operators must monitor disk space and apply their retention policy after stopping processes.
+
+## Shared conversations
+
+The dashboard owns worker execution. Editor/terminal clients communicate over a temporary private Unix socket using a per-dashboard random token read from a mode-0600 runtime descriptor; there is no TCP listener. The token and generated workspaces stay outside the source checkout. Local clients have the authority of the same OS user; this is not a boundary against a compromised account. Worker tool policy and write confinement remain in effect.
+
+Sending requires a new human confirmation bound to the ticket, message, branch/worktree content, previous turn/history, native session ID, previously approved plan scope, and verification settings. Replayed or stale previews are rejected. Follow-ups invalidate prior acceptance and affected downstream evidence, then rerun checks and require fresh implementation review. The bridge accepts only snapshot, follow-up preview/send and pause preview/confirm operations; it does not expose arbitrary command execution, Jira writes, pushes or acceptance.
+
+The generated editor task uses Python isolated mode (`-I`), keeping the editable worktree and PYTHONPATH out of client module resolution. The editor conversation key is fixed to the ticket whose worktree the window opened. Ticket switching remains in the main dashboard.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 — shared worker conversations
+
+- Added a Sessions tab with persisted messages, replies, output, drafts and explicit follow-up approval.
+- Added Open session and Open VS Code controls for recorded worker worktrees.
+- Generated private VS Code workspaces with a shared conversation terminal task; no checkout switching or repository task-file edits.
+- Added a private Unix-socket bridge and `session KEY` client, with exact-context confirmation and replay rejection.
+- Captured and resumed exact native Gemini session UUIDs when supported, with labelled saved-context continuation for older runs.
+- Preserved supervision of other workers when pausing one member of a batch.
+- Reran verification and invalidated acceptance/downstream review when continuing a session.
+
 ## 0.1.1 — public alpha
 
 - Added the owner-selected MIT license and tested dependency constraints.

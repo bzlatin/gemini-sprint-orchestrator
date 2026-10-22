@@ -28,7 +28,9 @@ from textual.widgets import (
 
 from .config import Profiles
 from .engine import Engine
-from .models import Check, OrchestratorError, State
+from .models import Check, OrchestratorError, State, digest
+from .session_widgets import SessionPanel, confirmation_text
+from .sessions import SessionBridge, open_vscode
 
 
 class Confirmation(ModalScreen[bool]):
@@ -105,6 +107,9 @@ class Dashboard(App[None]):
         self.execution_task: asyncio.Task[None] | None = None
         self.last_view = ""
         self.loaded_review: tuple[str, str] | None = None
+        self.loaded_session = ""
+        self.session_drafts: dict[str, str] = {}
+        self.bridge = SessionBridge(engine, connected_enabled=connected_enabled)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -141,10 +146,14 @@ class Dashboard(App[None]):
             with TabPane("Agents", id="agents"):
                 with VerticalScroll(classes="document"):
                     yield Static(id="agent-text", markup=False)
-                yield Input(placeholder="Ticket key for pause or cancel", id="agent-key")
+                yield Input(placeholder="Worker ticket key", id="agent-key")
                 with Horizontal(classes="actions"):
+                    yield Button("Open session", id="agent-session", variant="primary")
+                    yield Button("Open VS Code", id="agent-code")
                     yield Button("Pause worker", id="pause")
                     yield Button("Cancel worker", id="cancel", variant="warning")
+            with TabPane("Sessions", id="sessions"):
+                yield SessionPanel()
             with TabPane("Approvals", id="approvals"):
                 with VerticalScroll(classes="document"):
                     yield Static(id="approval-text", markup=False)
@@ -201,8 +210,10 @@ class Dashboard(App[None]):
             self.query_one("#details-scroll").styles.height = 3 if compact else 5
             self.query_one("#overview").styles.height = 2 if compact else 3
             self.query_one("#notice").styles.height = 1 if compact else 2
+            self.query_one("#session-message").styles.height = 3 if compact else 5
+            self.query_one("#session-status").styles.height = 2 if compact else 3
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self.on_resize()
         table = self.query_one("#tickets", DataTable)
         table.add_columns("Pick", "Ticket", "Lifecycle", "Priority", "Summary", "Jira status")
@@ -210,9 +221,75 @@ class Dashboard(App[None]):
         self.update_views()
         self.set_interval(0.5, self.update_views)
         table.focus()
+        try:
+            await self.bridge.start()
+        except (OSError, ValueError) as exc:
+            self.notice(
+                f"VS Code session connection unavailable: {exc}. Dashboard conversations still work."
+            )
+
+    async def on_unmount(self) -> None:
+        await self.bridge.close()
+
+    def load_session(self, key: str | None = None) -> None:
+        key = key or self.query_one("#session-key", Input).value.strip().upper()
+        snapshot = self.engine.session_snapshot(key)
+        if self.loaded_session:
+            self.session_drafts[self.loaded_session] = self.query_one(
+                "#session-message", TextArea
+            ).text
+        self.loaded_session = key
+        self.query_one("#session-key", Input).value = key
+        self.query_one("#session-message", TextArea).load_text(self.session_drafts.get(key, ""))
+        self.query_one(SessionPanel).show_snapshot(snapshot)
+        self.query_one(TabbedContent).active = "sessions"
+        self.call_after_refresh(
+            self.screen.set_focus,
+            self.query_one("#session-message", TextArea),
+            scroll_visible=False,
+        )
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if event.pane.id == "sessions" and self.loaded_session:
+            self.call_after_refresh(
+                self.screen.set_focus,
+                self.query_one("#session-message", TextArea),
+                scroll_visible=False,
+            )
+
+    def checked_session_key(self) -> str:
+        if (
+            not self.loaded_session
+            or self.query_one("#session-key", Input).value.strip().upper() != self.loaded_session
+        ):
+            raise OrchestratorError("Load the ticket session before sending or opening its editor")
+        return self.loaded_session
+
+    @work(group="session-turn")
+    async def wait_session_turn(self, task: asyncio.Task[None]) -> None:
+        try:
+            await asyncio.shield(task)
+            self.notice(
+                "Follow-up finished. Inspect the conversation, verification and implementation review."
+            )
+        except Exception as exc:
+            self.notice(exc)
+        finally:
+            self.update_views(force=True)
+
+    @work(group="editor")
+    async def open_editor(self, key: str) -> None:
+        try:
+            await open_vscode(self.engine, key, self.bridge)
+            self.notice(
+                f"Opened {key} in VS Code. Allow its session task, or use Terminal → Run Task → Gemini session: {key}."
+            )
+        except Exception as exc:
+            self.notice(exc)
 
     def notice(self, value: object) -> None:
-        self.query_one("#notice", Static).update(str(value))
+        if self.query("#notice"):
+            self.query_one("#notice", Static).update(str(value))
 
     def render_tickets(self) -> None:
         table = self.query_one("#tickets", DataTable)
@@ -392,6 +469,42 @@ class Dashboard(App[None]):
                 self.action_save_selection()
             elif button == "propose":
                 self.action_plan()
+            elif button == "agent-session":
+                self.load_session(
+                    self.query_one("#agent-key", Input).value.strip().upper() or self.current_key
+                )
+            elif button == "load-session":
+                self.load_session()
+            elif button in {"agent-code", "session-code"}:
+                key = (
+                    self.checked_session_key()
+                    if button == "session-code"
+                    else self.query_one("#agent-key", Input).value.strip().upper()
+                    or self.current_key
+                )
+                self.open_editor(key)
+            elif button == "session-send":
+                key = self.checked_session_key()
+                message = self.query_one("#session-message", TextArea).text
+                preview = self.engine.session_preview(key, message)
+                fingerprint = digest(preview)
+
+                def send() -> None:
+                    self.engine.approve_session_turn(key, message, actor, fingerprint)
+                    task = self.engine.launch_session_turn(
+                        key, message, connected_enabled=self.connected_enabled
+                    )
+                    if self.query_one("#session-message", TextArea).text == message:
+                        self.query_one("#session-message", TextArea).clear()
+                    self.wait_session_turn(task)
+
+                self.confirm(confirmation_text(preview), send)
+            elif button == "session-pause":
+                key = self.checked_session_key()
+                self.confirm(
+                    f"Pause {key}? Worktree and conversation are preserved.",
+                    lambda: self.stop_worker(key, True),
+                )
             elif button == "refresh":
                 self.action_refresh()
             elif button == "sort-priority":
@@ -526,6 +639,15 @@ class Dashboard(App[None]):
         if signature == self.last_view and not force and not active:
             return
         self.last_view = signature
+        if self.loaded_session:
+            try:
+                self.query_one(SessionPanel).show_snapshot(
+                    self.engine.session_snapshot(self.loaded_session)
+                )
+            except Exception as exc:
+                self.query_one("#session-send", Button).disabled = True
+                self.query_one("#session-code", Button).disabled = True
+                self.notice(exc)
         p = self.engine.profile
         running = sum(row["state"] in {State.IN_PROGRESS, State.VERIFYING} for row in rows)
         review = sum(row["state"] == State.READY_FOR_REVIEW for row in rows)
@@ -592,5 +714,6 @@ class Dashboard(App[None]):
                 table.update_cell(row["key"], list(table.columns)[2], row["state"])
 
     async def action_quit(self) -> None:
+        await self.bridge.close()
         await self.engine.shutdown()
         self.exit()

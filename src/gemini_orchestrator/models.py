@@ -65,8 +65,14 @@ TRANSITIONS: dict[State, set[State]] = {
         State.PAUSED,
     },
     State.PAUSED: {State.QUEUED, State.SELECTED, State.CANCELLED},
-    State.INTERRUPTED: {State.SELECTED, State.CANCELLED},
-    State.VERIFYING: {State.READY_FOR_REVIEW, State.FAILED, State.INTERRUPTED, State.CANCELLED},
+    State.INTERRUPTED: {State.SELECTED, State.CANCELLED, State.QUEUED},
+    State.VERIFYING: {
+        State.READY_FOR_REVIEW,
+        State.FAILED,
+        State.INTERRUPTED,
+        State.CANCELLED,
+        State.PAUSED,
+    },
     State.READY_FOR_REVIEW: {
         State.APPROVED,
         State.CHANGES_REQUESTED,
@@ -74,11 +80,11 @@ TRANSITIONS: dict[State, set[State]] = {
         State.PAUSED,
         State.CANCELLED,
     },
-    State.CHANGES_REQUESTED: {State.SELECTED, State.CANCELLED},
+    State.CHANGES_REQUESTED: {State.SELECTED, State.CANCELLED, State.QUEUED},
     State.APPROVED: {State.MR_READY, State.CHANGES_REQUESTED, State.VERIFYING},
     State.MR_READY: {State.CHANGES_REQUESTED, State.VERIFYING},
-    State.FAILED: {State.SELECTED, State.CANCELLED},
-    State.CANCELLED: {State.SELECTED},
+    State.FAILED: {State.SELECTED, State.CANCELLED, State.QUEUED},
+    State.CANCELLED: {State.SELECTED, State.QUEUED},
 }
 
 

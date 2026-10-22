@@ -2,7 +2,7 @@
 
 A local, human-controlled sprint control center for Gemini CLI. Select assigned Jira tickets, inspect dependency plans, run isolated workers, verify changes and review them before optional remote publication.
 
-**Version 0.1.1 is an MIT-licensed public alpha.** The offline demo is the supported starting point. Connected Gemini/Jira/hosting configurations require validation on the approved target system; this is not an enterprise security certification. See [release readiness](docs/release-readiness.md) and [known limitations](docs/limitations.md).
+**Version 0.2.0 is an MIT-licensed public alpha.** The offline demo is the supported starting point. Connected Gemini/Jira/hosting configurations require validation on the approved target system; this is not an enterprise security certification. See [release readiness](docs/release-readiness.md) and [known limitations](docs/limitations.md).
 
 ![Synthetic ticket explorer](docs/demo/01-selection.png)
 
@@ -31,6 +31,25 @@ The maintainer's [recorded walkthrough](docs/demo/README.md) exercised this life
 python -m pip install -c requirements-dev.lock -e '.[dev]'
 python scripts/demo_walkthrough.py --output /tmp/my-synthetic-sprint-demo
 ```
+
+## Worktree editor and shared conversations
+
+After launching a worker, open **Agents**, enter its ticket key, and choose **Open session** or **Open VS Code**. The **Sessions** tab also loads workers directly.
+
+- **Open VS Code** opens a separate window rooted in that ticket's recorded worktree and branch. It leaves the main checkout on its existing branch. A private generated workspace includes a **Gemini session: KEY** terminal task that connects to the same running coordinator.
+- Allow that workspace's automatic task when VS Code asks, or choose **Terminal → Run Task → Gemini session: KEY**. Workspace Trust and automatic-task preferences remain under your control. Install the `code` CLI on PATH if needed; the usual macOS application location is also detected. With Remote SSH, run the orchestrator in the same remote environment as the VS Code terminal.
+- In either view, inspect recent messages and output, type a follow-up, and confirm its exact ticket, worktree and verification commands. A follow-up starts another supervised coding turn, invalidates previous acceptance, reruns verification, and returns to human review.
+- Follow-ups run when the current batch is idle. Pause workers or let the batch finish first. This is conversation at turn boundaries; it does not inject keystrokes into an active headless CLI process.
+- When the installed CLI supports resume and returns a native session UUID, the next turn passes that exact UUID to Gemini. Older runs without an ID use clearly labelled saved conversation/task context. Resume failures remain visible and require attention.
+- Keep the main dashboard running. Closing the editor conversation view leaves its worker running; quitting the main dashboard stops its supervised workers. Session messages and replies persist in the profile's private runtime data.
+
+You can open the same conversation in another terminal:
+
+```sh
+gemini-orchestrator --profile demo session DEMO-1
+```
+
+See the [shared-session walkthrough](docs/demo/sessions/README.md) and [session guide](docs/sessions.md) for evidence and limits.
 
 ## Connected setup
 

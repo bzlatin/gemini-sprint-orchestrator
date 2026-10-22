@@ -1,6 +1,29 @@
-# Validation evidence — 0.1.1
+# Validation evidence
 
 Release checks used synthetic data only. No company service or real model account was contacted. The owner selected MIT, approved the initial private source upload and subsequently authorized public visibility after CI passed. On 2026-10-21 the GitHub API confirmed `private: false` and `visibility: public` for the [repository](https://github.com/bzlatin/gemini-sprint-orchestrator).
+
+## 0.2.0 — shared worker conversations
+
+The extension adds exact-worktree editor opening and the same supervised conversation in the dashboard/editor terminal. The checks below record the release candidate and its bounded synthetic evidence.
+
+| Check | Actual result |
+|---|---|
+| Local complete suite | 116 passed in 114.07 seconds; macOS / Python 3.13 |
+| Static checks | Ruff lint/format and Mypy passed; 22 source files |
+| Synthetic shared-session walkthrough | Passed through real dashboard and editor-terminal controls at 120×40 and 80×24 |
+| Persistence | Six conversation records survived restart; original worktree/branch preserved; checks reran |
+| Native continuity | Real sandboxed synthetic CLI asserted exact UUID passed to --resume |
+| Editor launch | Workspace/task/branch/cwd verified with stubbed code executable; actual terminal client exercised |
+| Editor isolation | Python -I prevented a worker-created package from shadowing the installed client |
+| Human control | Stale/replayed previews rejected; declined draft preserved; new turn invalidated acceptance/downstream review |
+| Failure/pause | Startup errors visible in chat; pausing verification or one batch member preserves work and supervision |
+| Interface review | Both listed material fixes scored resolved; ship at that two-fix-list scope |
+| Package and installed-wheel workflow | Wheel/sdist 0.2.0 built; installed site-packages copy passed pip check, CLI self-test and the complete shared-session walkthrough |
+| GitHub Actions | New feature matrix pending upload |
+
+[Walkthrough evidence](demo/sessions/README.md) distinguishes the real Textual applications from the stubbed VS Code GUI launch. VS Code is not installed on this development machine. The Gemini executable in the connected test is synthetic: no real provider account, credentials or company service were used. Actual VS Code/Remote SSH and native provider auth/history behavior remain target-system checks. Runtime dependencies are unchanged from the previously audited pinned set; the inventory root version is updated to 0.2.0.
+
+## 0.1.1 — public alpha baseline
 
 | Check | Actual result |
 |---|---|
