@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
@@ -163,7 +164,12 @@ async def test_dashboard_search_and_full_execution(engine: Engine, profiles: Pro
         await pilot.click("#launch")
         await pilot.pause()
         await pilot.click("#confirm")
-        await pilot.pause(2)
+        async with asyncio.timeout(20):
+            while any(
+                engine.store.row(key)["state"] != State.READY_FOR_REVIEW
+                for key in ("DEMO-1", "DEMO-2")
+            ):
+                await pilot.pause(0.1)
         assert engine.store.row("DEMO-1")["state"] == State.READY_FOR_REVIEW
         assert engine.store.row("DEMO-2")["state"] == State.READY_FOR_REVIEW
         app.query_one(TabbedContent).active = "review"
