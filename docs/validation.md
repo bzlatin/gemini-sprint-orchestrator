@@ -8,14 +8,17 @@ The release adds restricted filesystem reads/writes and clean environments for w
 
 | Check | Actual result |
 |---|---|
-| Local regression suite | 133 passed in 119.09 seconds; macOS / Python 3.13 |
+| Local regression suite | 133 passed in 119.09 seconds; final host-process/supervision/model checks: 29 passed; synchronized dashboard lifecycle test passed |
 | macOS process boundaries | Real synthetic processes denied controller/sibling-worktree/symlink reads, localhost networking in checks, question-mode source writes and host-process environment inspection |
 | Configuration and credentials | Editor execution configuration refused; worker configuration writes denied; wrong-ticket and stale-generation credentials rejected |
 | Question continuity | Synthetic connected CLI used a separate read-only tool policy, did not resume coding, and preserved implementation evidence |
 | Disk controls | Oversized process stopped; symlink/current logs excluded from retention candidates |
 | Static checks | Ruff and Mypy passed for 24 source files |
 | Package | 0.3.0 wheel/sdist built; installed wheel passed pip check, CLI self-test, full shared-session UI walkthrough and target harness in synthetic mode |
-| CI | Current macOS/Linux matrix and mandatory real sandbox checks pending push |
+| GitHub Actions / macOS and Ubuntu, Python 3.11 and 3.13 | 134 passed on each platform/version; zero skips; static checks, required boundary guard, CLI self-test and build passed |
+| GitHub Actions / security | Runtime dependency audit and offline secret scan passed |
+
+The complete [0.3.0 validation run](https://github.com/bzlatin/gemini-sprint-orchestrator/actions/runs/39779803913) passed all five jobs for commit `39b870ba649a3ccb2ed670c78aa18e07d4a9d7d9`. All four JUnit artifacts recorded 134 tests, zero failures/errors and zero skips. Subsequent evidence updates change documentation only.
 
 The [recorded reports](demo/hardening/README.md) contain synthetic data only. The new [target validation harness](hardening.md#approved-target-machine-exercise) is available for approved real-provider/editor tests. Gemini and VS Code are absent here; their real authentication, GUI and Remote SSH behavior remain unvalidated. The Linux CI configuration now installs bubblewrap and rejects skipped boundary tests instead of counting them as coverage. Watchdog disk limits can overshoot between polls and are not kernel quotas. Same-account unsandboxed clients remain trusted.
 
