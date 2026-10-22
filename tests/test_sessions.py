@@ -260,7 +260,7 @@ async def test_remote_console_confirmation(engine: Engine) -> None:
             app.query_one("#session-message", TextArea).load_text("From the editor terminal")
             app.query_one("#session-send", Button).press()
             async with asyncio.timeout(5):
-                while not isinstance(app.screen, Confirmation):
+                while not isinstance(app.screen, Confirmation) or not app.screen.query("#confirm"):
                     await pilot.pause(0.1)
             app.screen.query_one("#confirm", Button).press()
             await pilot.pause(0.2)
