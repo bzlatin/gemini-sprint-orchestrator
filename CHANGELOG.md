@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 — connect once
+
+- Connected profiles can be allowed once, during setup or with `profile connected --enable`, to contact Jira and Gemini from this machine; commands then need no `--enable-connected`. The flag still works per command, `profile connected --disable` turns consent off, and demo profiles can never be allowed.
+- The consent is excluded from the configuration fingerprint, so enabling it, or upgrading from 0.5.0, keeps existing approvals and in-progress work.
+
 ## 0.5.0 — plan first, simpler flow
 
 - Every ticket's first Gemini turn now drafts a detailed implementation plan from the full Jira ticket, with read-only tools and OS write denial. Coding starts only after a human approves that exact plan; comments make Gemini revise it in the same session, and rejecting stops the ticket and keeps its worktree.

@@ -288,6 +288,14 @@ def connect_jira(profile: Profile) -> None:
             console.print(f"Jira verification failed: {exc}. Retry, or continue and connect later.")
 
 
+def configure_access(profile: Profile) -> None:
+    profile.connected_access = Confirm.ask(
+        "Allow this profile to contact Jira and Gemini from this machine, so commands need no "
+        "--enable-connected flag? Every consequential action still asks for your approval",
+        default=bool(profile.identity.account_id),
+    )
+
+
 def summary(profile: Profile) -> str:
     jira = (
         f"{profile.jira.adapter} {profile.jira.server or profile.jira.base_url or ''}".strip()
@@ -310,6 +318,12 @@ def summary(profile: Profile) -> str:
             + (f" · verified as {identity}" if identity else " · identity not verified")
             + (f" · board {profile.board_id}" if profile.board_id else "")
             + (f" · sprint {profile.sprint.name}" if profile.sprint else ""),
+            "  Access:      "
+            + (
+                "may contact Jira and Gemini on this machine"
+                if profile.connected_access
+                else "off; commands need --enable-connected"
+            ),
             "  Checks:      " + (", ".join(c.name for c in profile.checks) or "manual review only"),
             f"  Hosting:     {profile.hosting} (remote writes off)",
         ]
@@ -365,6 +379,8 @@ def wizard(
         console.print(
             "Jira identity is not verified yet; ticket retrieval stays off until you connect."
         )
+    if not profile.connected_access:
+        configure_access(profile)
     configure_checks(profile)
     profile.remote_writes = False
     while True:
@@ -377,6 +393,7 @@ def wizard(
                 "identity",
                 "team",
                 "jira",
+                "access",
                 "repository",
                 "gemini",
                 "branches",
@@ -398,6 +415,8 @@ def wizard(
             profile.team = Prompt.ask("Team (separate from board/project)", default=profile.team)
         elif field == "jira":
             connect_jira(profile)
+        elif field == "access":
+            configure_access(profile)
         elif field == "repository":
             profile.repository = Path(Prompt.ask("Repository path")).expanduser().resolve()
             Git(profile.repository).validate()
@@ -452,7 +471,10 @@ def wizard(
     # Local diagnostics only: no Jira or model access.
     for item, status in diagnostics(profile).items():
         console.print(f"{item}: {status}")
-    console.print("Next: gemini-orchestrator start --enable-connected")
+    console.print(
+        "Next: gemini-orchestrator start"
+        + ("" if profile.connected_access else " --enable-connected")
+    )
     return profile
 
 

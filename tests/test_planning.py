@@ -290,3 +290,50 @@ else:
     assert implementing["home"] == planning["home"]
     assert implementing["resumed"] == "4b1c2f2e-2a51-4f43-8f2e-0d6c1f3b9a11"
     assert implementing["approved"] == "1. Edit src/help.py\n2. Add a test"
+
+
+def test_connected_access_is_one_time_profile_consent(profiles: Profiles) -> None:
+    from gemini_orchestrator.cli import connected_access
+    from gemini_orchestrator.models import digest
+
+    demo = create_demo(profiles)
+    work = Profile.model_validate({**demo.model_dump(), "name": "work", "mode": "connected"})
+    profiles.save(work)
+    home = ["--home", str(profiles.home), "--profile", "work"]
+    refused = runner.invoke(app, [*home, "work", "DEMO-1"])
+    assert refused.exit_code == 1 and "profile connected --enable" in str(refused.exception)
+    assert connected_access(work, True)
+    assert not connected_access(demo, False)
+    declined = runner.invoke(app, [*home, "profile", "connected", "--enable"], input="n\n")
+    assert declined.exit_code == 1 and not profiles.load("work").connected_access
+    allowed = runner.invoke(app, [*home, "profile", "connected", "--enable"], input="y\n")
+    assert allowed.exit_code == 0, allowed.output
+    saved = profiles.load("work")
+    assert saved.connected_access and connected_access(saved, False)
+    # Consent is not part of the configuration fingerprint, so approvals survive toggling it.
+    assert digest(saved) == digest(work)
+    runner.invoke(app, [*home, "profile", "connected", "--disable"])
+    assert not profiles.load("work").connected_access
+    demo_home = ["--home", str(profiles.home), "--profile", "demo"]
+    assert runner.invoke(app, [*demo_home, "profile", "connected", "--enable"]).exit_code == 1
+    with pytest.raises(ValueError, match="Demo profiles"):
+        Profile.model_validate({**demo.model_dump(), "connected_access": True})
+
+
+def test_setup_records_connected_access_once(profiles: Profiles) -> None:
+    from unittest.mock import patch
+
+    from gemini_orchestrator.setup import wizard
+
+    demo = create_demo(profiles)
+    answers = iter(["Alex", str(demo.repository), "missing-gemini", "{key}", "later", "save"])
+    with (
+        patch("gemini_orchestrator.setup.Prompt.ask", side_effect=lambda *a, **kw: next(answers)),
+        patch(
+            "gemini_orchestrator.setup.Confirm.ask",
+            side_effect=lambda prompt, **kw: prompt.startswith("Allow this profile"),
+        ),
+        patch("gemini_orchestrator.setup.shutil.which", return_value=None),
+    ):
+        profile = wizard(profiles, "consented")
+    assert profile.connected_access and profiles.load("consented").connected_access

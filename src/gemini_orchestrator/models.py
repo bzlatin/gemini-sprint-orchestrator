@@ -5,7 +5,7 @@ import json
 import re
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -16,7 +16,8 @@ class OrchestratorError(Exception):
 
 def digest(value: Any) -> str:
     if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
+        # Some settings (such as local access consent) must not invalidate existing approvals.
+        value = value.model_dump(mode="json", exclude=getattr(value, "DIGEST_EXCLUDE", None))
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
@@ -207,8 +208,11 @@ class IsolationSettings(BaseModel):
 
 class Profile(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    DIGEST_EXCLUDE: ClassVar[set[str]] = {"connected_access"}
     name: str
     mode: str = "connected"
+    # One-time human consent for this profile to contact Jira and Gemini on this machine.
+    connected_access: bool = False
     display_name: str
     email: str | None = None
     identity: Identity = Field(default_factory=Identity)
@@ -260,6 +264,8 @@ class Profile(BaseModel):
         self.worktrees = self.worktrees.expanduser().resolve()
         if self.worktrees == self.repository or self.worktrees.is_relative_to(self.repository):
             raise ValueError("Worktrees must be outside the main checkout")
+        if self.mode == "demo" and self.connected_access:
+            raise ValueError("Demo profiles cannot be allowed to contact Jira or Gemini")
         if self.mode not in {"demo", "connected"} or self.hosting not in {
             "local",
             "github",
