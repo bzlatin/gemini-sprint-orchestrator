@@ -13,7 +13,7 @@ from gemini_orchestrator.config import Profiles
 from gemini_orchestrator.dashboard import Confirmation, Dashboard
 from gemini_orchestrator.demo import create_demo
 from gemini_orchestrator.engine import Engine
-from gemini_orchestrator.models import State
+from gemini_orchestrator.models import OrchestratorError, State
 from gemini_orchestrator.setup import configure_connected_resources, select_resource, wizard
 
 runner = CliRunner()
@@ -44,33 +44,56 @@ def test_onboarding_offline_identity_not_assumed(profiles: Profiles) -> None:
     answers = iter(
         [
             "Alex",
-            "alex@example.invalid",
             str(demo.repository),
-            str(demo.repository.parent / "new-worktrees"),
-            "Platform",
             "missing-gemini",
-            "Focused implementation",
             "{bad}/{key}",
             "{key}-work",
             "later",
-            "local",
             "save",
         ]
     )
     with (
         patch("gemini_orchestrator.setup.Prompt.ask", side_effect=lambda *a, **kw: next(answers)),
-        patch(
-            "gemini_orchestrator.setup.Confirm.ask",
-            side_effect=lambda *a, **kw: a[0].startswith(("Use existing", "Save this")),
-        ),
-        patch("gemini_orchestrator.setup.typer.prompt", side_effect=[2, 120, 1]),
+        patch("gemini_orchestrator.setup.Confirm.ask", return_value=False),
+        patch("gemini_orchestrator.setup.shutil.which", return_value=None),
     ):
         profile = wizard(profiles, "personal")
     assert profile.display_name == "Alex"
     assert profile.branch_template == "{key}-work"
+    assert profile.worktrees == demo.repository.parent / "sample-repository-worktrees"
+    assert profile.gemini.executable == "missing-gemini" and profile.gemini.plan_first
+    assert profile.hosting == "local" and profile.email is None and not profile.checks
     assert profile.identity.account_id == ""
     assert not profile.remote_writes
     assert profiles.active() == "personal"
+    with pytest.raises(StopIteration):
+        next(answers)
+
+
+def test_onboarding_accepts_suggested_checks_and_can_cancel(profiles: Profiles) -> None:
+    demo = create_demo(profiles)
+    (demo.repository / "pyproject.toml").write_text("[project]\nname = 'sample'\n")
+    answers = iter(["Alex", str(demo.repository), "missing-gemini", "{key}", "later", "save"])
+    with (
+        patch("gemini_orchestrator.setup.Prompt.ask", side_effect=lambda *a, **kw: next(answers)),
+        patch(
+            "gemini_orchestrator.setup.Confirm.ask",
+            side_effect=lambda prompt, **kw: prompt.startswith("Use these checks"),
+        ),
+        patch("gemini_orchestrator.setup.shutil.which", return_value=None),
+    ):
+        profile = wizard(profiles, "checks")
+    # Only programs that exist are suggested; python is always available.
+    assert [check.argv for check in profile.checks] == [["python", "-m", "pytest"]]
+    cancel = iter(["Alex", str(demo.repository), "missing-gemini", "{key}", "later", "cancel"])
+    with (
+        patch("gemini_orchestrator.setup.Prompt.ask", side_effect=lambda *a, **kw: next(cancel)),
+        patch("gemini_orchestrator.setup.Confirm.ask", return_value=False),
+        patch("gemini_orchestrator.setup.shutil.which", return_value=None),
+        pytest.raises(OrchestratorError, match="not saved"),
+    ):
+        wizard(profiles, "cancelled")
+    assert "cancelled" not in profiles.names()
 
 
 def test_manual_resource_selection_is_explicit() -> None:
@@ -277,6 +300,24 @@ def test_mcp_settings_rejects_blank_unknown_and_resets_identity(
     assert engine.profile.jira.settings_path == settings
     assert engine.profile.jira.cloud_id == ""
     assert engine.profile.identity.account_id == ""
+
+
+def test_mcp_settings_defaults_to_the_single_jira_server(engine: Engine, tmp_path: Path) -> None:
+    from gemini_orchestrator.setup import configure_mcp_settings
+
+    settings = tmp_path / "settings.json"
+    settings.write_text(
+        '{"mcpServers": {"github": {"command": "a"}, "company-jira": {"command": "b"}}}'
+    )
+    defaults = []
+
+    def ask(prompt, default=None, **kw):
+        defaults.append(default)
+        return {0: str(settings), 1: default, 2: ""}[len(defaults) - 1]
+
+    with patch("gemini_orchestrator.setup.Prompt.ask", side_effect=ask):
+        assert configure_mcp_settings(engine.profile)
+    assert engine.profile.jira.server == "company-jira" and defaults[1] == "company-jira"
 
 
 @pytest.mark.parametrize(

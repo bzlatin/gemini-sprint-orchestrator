@@ -8,6 +8,8 @@
 - Ticket lists and `status` show readiness (`Ready` / `Waiting on KEY`) and each ticket's next step. Accepted prerequisites no longer block a newly started dependent.
 - The scheduler fills free worker slots as plans are approved or prerequisites accepted, instead of running fixed groups.
 - The old dependency `plan` command is now `schedule`; less common commands are listed under *Advanced* in `--help`.
+- Shorter setup: only name, repository, branch naming, Jira and checks are asked; the repository, worktree folder, Gemini CLI, Jira MCP server and suggested checks are detected, and everything else is editable from a compact summary.
+- README now covers updating, plus copy-paste Gemini CLI prompts that install or update the tool (setup itself stays a human-run wizard).
 - Existing profiles gain `plan_first` and `branch_template`, which changes their configuration fingerprint, so start work again after upgrading.
 
 ## 0.4.0 — Jira MCP compatibility

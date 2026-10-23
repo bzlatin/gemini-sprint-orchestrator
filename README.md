@@ -15,10 +15,14 @@ tickets ──► work ──► Gemini plans (read-only) ──► you approve 
 Python 3.11+ and Git on macOS or Linux (Linux also needs `bubblewrap`):
 
 ```sh
+git clone https://github.com/bzlatin/gemini-sprint-orchestrator.git
+cd gemini-sprint-orchestrator
 python3 -m venv .venv && source .venv/bin/activate
 python -m pip install -c requirements.lock -e .
 gemini-orchestrator demo
 ```
+
+Prefer to let Gemini do the install? See [Install or update with Gemini CLI](#install-or-update-with-gemini-cli).
 
 The demo uses synthetic tickets and a sample repository; no Gemini, Jira, credentials or network.
 
@@ -58,16 +62,94 @@ Details: [security](docs/security.md), [hardening](docs/hardening.md), [security
 
 ## Connected setup
 
-On an approved work system:
+On an approved work system, run setup from inside the repository you want to work in:
 
 ```sh
-gemini-orchestrator setup          # profile, Jira MCP server, repo, branch naming, checks
-gemini-orchestrator doctor
+cd path/to/your-project
+gemini-orchestrator setup          # a few questions: name, repo, branch naming, Jira, checks
 gemini-orchestrator jira test --enable-connected
 gemini-orchestrator start --enable-connected
 ```
 
+Setup detects the repository, a worktree folder next to it, your Gemini CLI, the Jira server in your Gemini MCP settings and suggested checks. You confirm your Jira account, board and sprint yourself, and can change any default (team, hosting, concurrency, timeouts, plan-first) from the summary before saving. It finishes with local diagnostics; `doctor` reruns them.
+
 Jira Cloud, Server and Data Center work through supported MCP tools; direct REST is Jira Cloud only. See [integration compatibility](docs/integrations.md) and [enterprise deployment](docs/enterprise.md). Gemini runs with an isolated home; authenticate it once per ticket home as described in [hardening](docs/hardening.md).
+
+## Updating
+
+New versions are listed in the [changelog](CHANGELOG.md). Read it before updating: it calls out breaking changes and anything you need to redo (0.5.0, for example, renames `plan` to `schedule` and needs in-progress work started again).
+
+1. Quit the dashboard; this also stops its workers. Note any tickets you are mid-review on.
+2. Optionally back up your local data folder (`~/.local/share/gemini-orchestrator`, or `GSO_HOME`). Databases are not migrated automatically.
+3. Update the checkout and its dependencies:
+
+```sh
+cd gemini-sprint-orchestrator
+git pull
+source .venv/bin/activate
+python -m pip install -c requirements.lock -e .
+gemini-orchestrator doctor
+```
+
+To stay on a specific release instead of the latest `main`, check out its tag (for example `git checkout v0.5.0`, once releases are tagged) in place of `git pull`. Worktrees, branches and accepted commits are never deleted by an update.
+
+## Install or update with Gemini CLI
+
+Copy one of these prompts into Gemini CLI in a terminal. Gemini asks before each command it runs; read each one before allowing it. Gemini only installs or updates the tool. It never runs `setup` for you, because setup is where you confirm your Jira account and which commands may run on your code. If Gemini or its model is unavailable, use the manual steps above.
+
+<details>
+<summary>Install prompt</summary>
+
+```text
+Install the open-source "gemini-sprint-orchestrator" tool for me. Follow these rules:
+- Explain each shell command before running it and wait for my approval. Never use sudo
+  without asking me first.
+- Do not read, print, copy or edit credentials, tokens, ~/.gemini settings, or any files
+  under ~/.local/share/gemini-orchestrator.
+- If a step fails, stop and tell me the exact error and the likely fix. Do not work around
+  failures by skipping checks.
+
+Steps:
+1. Check that git and Python 3.11 or newer are installed. On Linux, also check that
+   `bwrap --version` works; if it does not, tell me the package to install (bubblewrap).
+2. Ask me where to install it (suggest ~/tools). Clone
+   https://github.com/bzlatin/gemini-sprint-orchestrator.git there.
+3. In the clone, create a virtual environment with `python3 -m venv .venv`, then run
+   `.venv/bin/python -m pip install -c requirements.lock -e .`.
+4. Verify with `.venv/bin/gemini-orchestrator test` and `.venv/bin/gemini-orchestrator
+   --home "$(mktemp -d)" demo --headless`.
+5. Ask whether I want the command on my PATH. If yes, and ~/.local/bin is on PATH, create a
+   symlink from ~/.local/bin/gemini-orchestrator to the .venv/bin/gemini-orchestrator file.
+6. Finish by telling me to run `gemini-orchestrator demo` to try it, and to run
+   `gemini-orchestrator setup` myself from inside my project's repository. Do not run setup.
+```
+
+</details>
+
+<details>
+<summary>Update prompt</summary>
+
+```text
+Update my existing "gemini-sprint-orchestrator" installation. Follow these rules:
+- Explain each shell command before running it and wait for my approval.
+- Do not read, print, copy or edit credentials, tokens, ~/.gemini settings, or any files
+  under ~/.local/share/gemini-orchestrator. Never delete worktrees or branches.
+- If a step fails, stop and tell me the exact error and the likely fix.
+
+Steps:
+1. Ask me where it is installed (look for a gemini-sprint-orchestrator clone, e.g. in ~/tools).
+2. Make sure the gemini-orchestrator dashboard is not running (ask me to quit it if it is).
+3. In the clone, run `git status`. If there are local changes, stop and ask me what to do.
+4. Run `git fetch --tags`, show me the CHANGELOG.md entries newer than my current version
+   (shown in src/gemini_orchestrator/__init__.py), and
+   summarize any breaking changes or steps I must redo.
+5. After I confirm, run `git pull`, then
+   `.venv/bin/python -m pip install -c requirements.lock -e .`.
+6. Verify with `.venv/bin/gemini-orchestrator test` and `.venv/bin/gemini-orchestrator doctor`,
+   and report the results.
+```
+
+</details>
 
 ## More
 

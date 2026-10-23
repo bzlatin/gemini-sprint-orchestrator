@@ -2,9 +2,9 @@
 
 ## Installation and first run
 
-Install Python 3.11+ and Git, create a virtual environment, then `pip install -e '.[dev]'` from this source checkout. `gemini-orchestrator` offers setup when no valid profile exists. `--help` lists all commands; global `--home` and `--profile` go before the subcommand.
+Install Python 3.11+ and Git, create a virtual environment, then `pip install -c requirements.lock -e .` from this source checkout (or use the Gemini CLI install prompt in the README). `gemini-orchestrator` offers setup when no valid profile exists. `--help` lists the core workflow first; global `--home` and `--profile` go before the subcommand. See the README's *Updating* section for upgrades.
 
-The wizard asks for a preferred name, optional email, team, Git checkout and worktree directory, Gemini executable/limits, integration choice, verification commands and hosting. A display name never substitutes for a Jira account ID. Only a confirmed authenticated identity enables ticket discovery. You may configure local settings now and connect later on a work system.
+The wizard asks only for your name, the repository (default: the current Git checkout), branch naming, the Jira connection and verification checks. It detects the Gemini CLI, places worktrees next to the repository and defaults to the single Jira-named server in your Gemini MCP settings. Email, team, hosting, concurrency, timeouts, retries, worker behavior and plan-first are editable from the summary before saving. A display name never substitutes for a Jira account ID. Only a confirmed authenticated identity enables ticket discovery. You may configure local settings now and connect later on a work system.
 
 MCP discovery can connect to configured servers, so it has a separate explicit prompt. Choose the exact Jira server when there is more than one. Project and board names are separate resources. Setup lists stable IDs, supports name search for longer lists, manual IDs when discovery is unsupported, multiple projects/boards, and an explicitly chosen board/sprint. Refresh or edit the profile when a sprint changes. Active sprint behavior rejects a stale sprint when the adapter can discover it; manual behavior uses the confirmed configured ID.
 
