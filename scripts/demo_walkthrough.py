@@ -122,6 +122,7 @@ async def walkthrough(directory: Path) -> dict[str, object]:
         summary["blocked_after_first_batch"] = {
             key: engine.store.row(key)["state"] for key in ("DEMO-3", "DEMO-6")
         }
+        await tab("agents", "agent-key")
         capture("03-workers-and-blockers")
         steps.append(
             "Approved plans were implemented in real worktrees; downstream and external blockers held"

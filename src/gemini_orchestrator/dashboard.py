@@ -352,6 +352,7 @@ class Dashboard(App[None]):
         cursor = self.query_one("#tickets", DataTable).cursor_row
         self.render_tickets()
         self.query_one("#tickets", DataTable).move_cursor(row=cursor)
+        self.update_views(force=True)
 
     def confirm(self, message: str, callback: Callable[[], Any]) -> None:
         def done(approved: bool | None) -> None:

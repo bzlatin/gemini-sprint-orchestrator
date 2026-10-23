@@ -154,6 +154,7 @@ async def test_dashboard_selection_plan_and_approval_gates(
         await pilot.press("space")
         assert "DEMO-1" in app.selected
         assert table.get_row("DEMO-1")[0].plain == "[x]"
+        assert "Selected 1 / 6" in str(app.query_one("#overview", Static).render())
         assert table.get_row("DEMO-3")[3].plain == "Waiting on DEMO-1"
         app.query_one("#branch-overrides", Input).value = "DEMO-1=feature/accessible-help"
         app.action_start()

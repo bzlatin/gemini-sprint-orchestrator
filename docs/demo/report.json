@@ -1,12 +1,12 @@
 {
   "mode": "synthetic demo",
   "steps": [
-    "Selected four tickets through the explorer; exact selection confirmed",
-    "Inspected plan; plan approval alone did not launch workers",
-    "Independent workers finished in real worktrees; downstream and external blockers held",
-    "Inspected actual review evidence and accepted both prerequisites through separate human gates",
-    "Launched dependent work only after prerequisite acceptance; verified and accepted it",
-    "Requested changes, approved a fresh plan/launch and accepted continuation in the original worktree",
+    "Selected four tickets; one confirmation approved readiness and branch names",
+    "Gemini planned ready tickets read-only; a human comment produced a revised plan",
+    "Approved plans were implemented in real worktrees; downstream and external blockers held",
+    "Inspected actual review evidence and accepted both prerequisites",
+    "Dependent work was planned and implemented only after prerequisite acceptance",
+    "Requested changes; the approved plan was continued in the original worktree and accepted",
     "Closed and reopened persisted SQLite state; feedback and accepted implementations survived"
   ],
   "blocked_after_first_batch": {
@@ -21,7 +21,7 @@
     "DEMO-5": "NOT_SELECTED",
     "DEMO-6": "NOT_SELECTED"
   },
-  "recorded_approval_grants": 11,
+  "recorded_approval_grants": 19,
   "captures": [
     "01-selection.svg",
     "02-plan.svg",
