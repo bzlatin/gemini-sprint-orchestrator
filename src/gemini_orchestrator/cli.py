@@ -81,6 +81,21 @@ def session(ctx: typer.Context) -> Iterator[Engine]:
         engine.close()
 
 
+ALLOW = "Contact Jira/Gemini for this command (or allow once: profile connected --enable)"
+
+
+def connected_access(profile: Profile, flag: bool) -> bool:
+    """Connected profiles contact Jira and Gemini only with one-time profile consent or the flag."""
+    if profile.mode != "connected":
+        return flag
+    if not (flag or profile.connected_access):
+        raise OrchestratorError(
+            "This profile may not contact Jira or Gemini yet. On your approved work system, run "
+            "`gemini-orchestrator profile connected --enable` once (or pass --enable-connected)"
+        )
+    return True
+
+
 def human_confirm(message: str) -> None:
     if not Confirm.ask(message, default=False):
         raise OrchestratorError("Human action declined; no approval granted")
@@ -154,8 +169,7 @@ def parse_branches(values: list[str]) -> dict[str, str]:
 def begin(ctx: typer.Context, keys: list[str], branches: list[str], enable_connected: bool) -> None:
     keys = [key.strip().upper() for key in keys]
     with session(ctx) as engine:
-        if engine.profile.mode == "connected" and not enable_connected:
-            raise OrchestratorError("Gemini turns require --enable-connected on an approved system")
+        enable_connected = connected_access(engine.profile, enable_connected)
         preview = engine.preview(
             keys, branches=parse_branches(branches), plan_id=uuid.uuid4().hex[:12]
         )
@@ -195,15 +209,14 @@ def demo(ctx: typer.Context, name: str = "demo", headless: bool = False) -> None
 
 
 @app.command(rich_help_panel=CORE)
-def start(ctx: typer.Context, enable_connected: bool = False) -> None:
+def start(
+    ctx: typer.Context, enable_connected: Annotated[bool, typer.Option(help=ALLOW)] = False
+) -> None:
     """Open the connected dashboard in an approved environment."""
     with session(ctx) as engine:
         if engine.profile.mode != "connected":
             raise OrchestratorError("Use demo for synthetic profiles")
-        if not enable_connected:
-            raise OrchestratorError(
-                "Company access is opt-in: run start --enable-connected on your approved work system"
-            )
+        connected_access(engine.profile, enable_connected)
         asyncio.run(engine.discover(connected_enabled=True))
         Dashboard(engine, registry(ctx), connected_enabled=True).run()
 
@@ -219,13 +232,17 @@ def worker_home(ctx: typer.Context, key: str) -> None:
 
 
 @app.command(rich_help_panel=ADVANCED)
-def ask(ctx: typer.Context, key: str, question: str, enable_connected: bool = False) -> None:
+def ask(
+    ctx: typer.Context,
+    key: str,
+    question: str,
+    enable_connected: Annotated[bool, typer.Option(help=ALLOW)] = False,
+) -> None:
     """Ask about a completed worker without granting coding or shell tools. Close the dashboard first."""
     from .models import digest
 
     with session(ctx) as engine:
-        if engine.profile.mode == "connected" and not enable_connected:
-            raise OrchestratorError("Questions require --enable-connected on an approved machine")
+        enable_connected = connected_access(engine.profile, enable_connected)
         preview = engine.session_preview(key, question)
         console.print(json.dumps(preview, indent=2))
         human_confirm(
@@ -279,13 +296,15 @@ def doctor(ctx: typer.Context) -> None:
 
 
 @jira_app.command("test")
-def jira_test(ctx: typer.Context, enable_connected: bool = False) -> None:
+def jira_test(
+    ctx: typer.Context, enable_connected: Annotated[bool, typer.Option(help=ALLOW)] = False
+) -> None:
     """Validate read-only capabilities and exact authenticated identity."""
-    if not enable_connected:
+    profile = configured(ctx)
+    if not connected_access(profile, enable_connected):
         raise OrchestratorError(
             "Jira access requires --enable-connected on an approved work system"
         )
-    profile = configured(ctx)
 
     async def check() -> None:
         async with JiraConnection(profile) as jira:
@@ -300,7 +319,7 @@ def jira_test(ctx: typer.Context, enable_connected: bool = False) -> None:
 def tickets(
     ctx: typer.Context,
     refresh: bool = False,
-    enable_connected: bool = False,
+    enable_connected: Annotated[bool, typer.Option(help=ALLOW)] = False,
     priority: str = "",
     status: str = "",
     issue_type: str = "",
@@ -309,7 +328,11 @@ def tickets(
     """List your sprint tickets and whether each is ready or waiting on prerequisites."""
     with session(ctx) as engine:
         if refresh:
-            asyncio.run(engine.discover(connected_enabled=enable_connected))
+            asyncio.run(
+                engine.discover(
+                    connected_enabled=connected_access(engine.profile, enable_connected)
+                )
+            )
         tickets = [
             ticket
             for ticket in (engine.store.ticket(row["key"]) for row in engine.current_rows())
@@ -342,7 +365,7 @@ def work(
     branch: Annotated[
         list[str], typer.Option("--branch", help="Override a branch name: KEY=name")
     ] = [],  # noqa: B006
-    enable_connected: bool = False,
+    enable_connected: Annotated[bool, typer.Option(help=ALLOW)] = False,
 ) -> None:
     """Start tickets: review branches and readiness once, then Gemini plans each ready ticket."""
     begin(ctx, keys, branch, enable_connected)
@@ -355,7 +378,7 @@ def implementation_plan(
     approve: bool = False,
     comment: Annotated[str, typer.Option(help="Ask Gemini to revise the plan")] = "",
     reject: bool = False,
-    enable_connected: bool = False,
+    enable_connected: Annotated[bool, typer.Option(help=ALLOW)] = False,
 ) -> None:
     """Read Gemini's implementation plan, then approve it, comment to refine it, or reject it."""
     key = key.strip().upper()
@@ -377,8 +400,8 @@ def implementation_plan(
                 )
             return
         choice = "reject" if reject else "approve" if approve else "comment"
-        if choice != "reject" and engine.profile.mode == "connected" and not enable_connected:
-            raise OrchestratorError("Gemini turns require --enable-connected on an approved system")
+        if choice != "reject":
+            enable_connected = connected_access(engine.profile, enable_connected)
         human_confirm(
             {
                 "approve": f"Approve this plan and let Gemini implement {key} in its worktree?",
@@ -407,12 +430,16 @@ def schedule(
     ctx: typer.Context,
     approve: bool = False,
     semantic: bool = False,
-    enable_connected: bool = False,
+    enable_connected: Annotated[bool, typer.Option(help=ALLOW)] = False,
 ) -> None:
     """Generate the dependency schedule for selected tickets. --approve adds a human gate."""
     with session(ctx) as engine:
         proposed = (
-            asyncio.run(engine.propose_semantic(connected_enabled=enable_connected))
+            asyncio.run(
+                engine.propose_semantic(
+                    connected_enabled=connected_access(engine.profile, enable_connected)
+                )
+            )
             if semantic
             else engine.propose()
         )
@@ -443,7 +470,9 @@ def dependencies(
 
 
 @app.command(rich_help_panel=ADVANCED)
-def run(ctx: typer.Context, enable_connected: bool = False) -> None:
+def run(
+    ctx: typer.Context, enable_connected: Annotated[bool, typer.Option(help=ALLOW)] = False
+) -> None:
     """Approve and launch an already-approved plan's queued workers."""
     with session(ctx) as engine:
         plan = engine.store.plan()
@@ -452,7 +481,9 @@ def run(ctx: typer.Context, enable_connected: bool = False) -> None:
             f"Launch workers for plan {plan.id} and run exactly its verification commands?"
         )
         engine.approve_launch(engine.profile.display_name)
-        asyncio.run(engine.execute(connected_enabled=enable_connected))
+        asyncio.run(
+            engine.execute(connected_enabled=connected_access(engine.profile, enable_connected))
+        )
         show_status(engine)
 
 
@@ -544,7 +575,11 @@ def review(
 
 
 @app.command(rich_help_panel=CORE)
-def retry(ctx: typer.Context, key: str, enable_connected: bool = False) -> None:
+def retry(
+    ctx: typer.Context,
+    key: str,
+    enable_connected: Annotated[bool, typer.Option(help=ALLOW)] = False,
+) -> None:
     """Continue failed, interrupted or change-requested work in its existing worktree."""
     begin(ctx, [key], [], enable_connected)
 
@@ -615,6 +650,28 @@ def profile_edit(ctx: typer.Context, name: str | None = None) -> None:
     """Edit an existing profile through the setup wizard."""
     existing = registry(ctx).load(name or ctx.obj["profile"])
     wizard(registry(ctx), existing.name, existing=existing)
+
+
+@profile_app.command("connected")
+def profile_connected(
+    ctx: typer.Context,
+    enable: Annotated[bool, typer.Option("--enable/--disable")] = True,
+) -> None:
+    """Allow or stop this profile contacting Jira and Gemini, so commands need no flag."""
+    profile = configured(ctx)
+    if profile.mode != "connected":
+        raise OrchestratorError("Demo profiles never contact Jira or Gemini")
+    if enable:
+        human_confirm(
+            f"Allow profile {profile.name} to contact Jira and Gemini from this machine without "
+            "--enable-connected? Every consequential action still asks for your approval."
+        )
+    profile.connected_access = enable
+    registry(ctx).save(profile)
+    console.print(
+        f"Profile {profile.name}: Jira and Gemini access "
+        + ("allowed on this machine." if enable else "off; commands need --enable-connected.")
+    )
 
 
 @profile_app.command("remote-writes")

@@ -6,7 +6,7 @@ Pick your assigned Jira tickets, see which are ready and which wait on others, a
 tickets ──► work ──► Gemini plans (read-only) ──► you approve / comment / reject ──► Gemini implements ──► you review & accept
 ```
 
-**Version 0.5.0 is an MIT-licensed public alpha.** The offline demo is the supported starting point. Connected Gemini/Jira configurations need validation on your approved work system; this is not an enterprise security certification. See [release readiness](docs/release-readiness.md) and [known limitations](docs/limitations.md).
+**Version 0.5.1 is an MIT-licensed public alpha.** The offline demo is the supported starting point. Connected Gemini/Jira configurations need validation on your approved work system; this is not an enterprise security certification. See [release readiness](docs/release-readiness.md) and [known limitations](docs/limitations.md).
 
 ![Synthetic ticket explorer](docs/demo/01-selection.png)
 
@@ -44,7 +44,7 @@ gemini-orchestrator review APP-1 --accept
 gemini-orchestrator status                          # every ticket's next step
 ```
 
-Use `--profile demo` with the demo. Connected profiles add `--enable-connected` to commands that contact Jira or Gemini. `gemini-orchestrator --help` lists the core workflow first; everything else is under *Advanced*.
+Use `--profile demo` with the demo. A connected profile contacts Jira or Gemini only after you allow it once (during setup, or `gemini-orchestrator profile connected --enable`); until then, add `--enable-connected` per command. `gemini-orchestrator --help` lists the core workflow first; everything else is under *Advanced*.
 
 ## Branch names
 
@@ -66,12 +66,12 @@ On an approved work system, run setup from inside the repository you want to wor
 
 ```sh
 cd path/to/your-project
-gemini-orchestrator setup          # a few questions: name, repo, branch naming, Jira, checks
-gemini-orchestrator jira test --enable-connected
-gemini-orchestrator start --enable-connected
+gemini-orchestrator setup          # a few questions: name, repo, branch naming, Jira, access, checks
+gemini-orchestrator jira test
+gemini-orchestrator start
 ```
 
-Setup detects the repository, a worktree folder next to it, your Gemini CLI, the Jira server in your Gemini MCP settings and suggested checks. You confirm your Jira account, board and sprint yourself, and can change any default (team, hosting, concurrency, timeouts, plan-first) from the summary before saving. It finishes with local diagnostics; `doctor` reruns them.
+Setup detects the repository, a worktree folder next to it, your Gemini CLI, the Jira server in your Gemini MCP settings and suggested checks. You confirm your Jira account, board and sprint yourself, and allow the profile to contact Jira and Gemini from this machine once (turn it off any time with `profile connected --disable`), and can change any default (team, hosting, concurrency, timeouts, plan-first) from the summary before saving. It finishes with local diagnostics; `doctor` reruns them.
 
 Jira Cloud, Server and Data Center work through supported MCP tools; direct REST is Jira Cloud only. See [integration compatibility](docs/integrations.md) and [enterprise deployment](docs/enterprise.md). Gemini runs with an isolated home; authenticate it once per ticket home as described in [hardening](docs/hardening.md).
 
@@ -91,7 +91,7 @@ python -m pip install -c requirements.lock -e .
 gemini-orchestrator doctor
 ```
 
-To stay on a specific release instead of the latest `main`, check out its tag (for example `git checkout v0.5.0`, once releases are tagged) in place of `git pull`. Worktrees, branches and accepted commits are never deleted by an update.
+To stay on a specific release instead of the latest `main`, check out its tag (for example `git checkout v0.5.1`) in place of `git pull`. Worktrees, branches and accepted commits are never deleted by an update.
 
 ## Install or update with Gemini CLI
 
