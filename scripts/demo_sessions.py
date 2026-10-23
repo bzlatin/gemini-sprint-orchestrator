@@ -41,6 +41,12 @@ async def demo(output: Path) -> None:
         engine.approve_plan("Synthetic operator")
         engine.approve_launch("Synthetic operator")
         await engine.execute()
+        # Plan first: approve each read-only plan, then the approved work is implemented.
+        for key in ("DEMO-1", "DEMO-2"):
+            proposal = engine.implementation_plan(key)
+            assert proposal is not None, engine.store.events(10)
+            engine.decide_plan(key, "approve", "Synthetic operator", str(proposal["fingerprint"]))
+        await engine.execute()
         original_path = engine.store.row("DEMO-1")["worktree"]
         original_branch = engine.store.row("DEMO-1")["branch"]
         app = Dashboard(engine, profiles)
@@ -154,7 +160,8 @@ async def demo(output: Path) -> None:
         engine.close()
     reopened = Engine(profiles.load(profile.name), profiles.runtime(profile.name))
     try:
-        assert len(reopened.conversation("DEMO-1")) == 6
+        # Plan request, plan and approval, then the implementation turn and two follow-ups.
+        assert len(reopened.conversation("DEMO-1")) == 9
         report["conversation_survived_restart"] = True
     finally:
         reopened.close()

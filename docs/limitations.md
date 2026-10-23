@@ -13,7 +13,7 @@ The demo and automated tests validate the local lifecycle. They do not establish
 - Remote adapter behavior is mocked in tests; actual CLI versions and auth require target validation. Draft creation failures consume the grant so retries need fresh confirmation.
 - The source is licensed under MIT. The public repository is: [bzlatin/gemini-sprint-orchestrator](https://github.com/bzlatin/gemini-sprint-orchestrator).
 
-Optional Gemini semantic analysis (`plan --semantic --enable-connected`) is advisory and may miss conflicts. Source excerpts are bounded and limited to declared relevant paths; it does not claim a complete semantic codebase index. Request/branch retrieval adapters exist, but live remote MR/PR context is not automatically included in planning.
+Optional Gemini semantic analysis (`schedule --semantic --enable-connected`) is advisory and may miss conflicts. Source excerpts are bounded and limited to declared relevant paths; it does not claim a complete semantic codebase index. Request/branch retrieval adapters exist, but live remote MR/PR context is not automatically included in planning.
 
 Shared session clients use a private local Unix socket and require the dashboard to stay running on the same machine or Remote SSH environment. VS Code must be installed; automatic terminal tasks require the user's workspace trust/task permission. Follow-ups wait for the batch to become idle and remain bounded by the existing approved ticket scope. The conversation view retains a recent window (up to 100 records / 60,000 characters); full recorded entries remain in private SQLite runtime data.
 

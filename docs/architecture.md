@@ -10,6 +10,9 @@ flowchart LR
   Engine --> Gate[Exact-action human approval gates]
   Gate --> Git[Git branches / isolated worktrees]
   Git --> Supervisor[Async process supervisor + parent guardian]
+  Supervisor --> PlanTurn[Read-only Gemini planning turn]
+  PlanTurn --> PlanGate[Human approve / comment / reject]
+  PlanGate --> Supervisor
   Supervisor --> Demo[Synthetic worker subprocesses]
   Supervisor --> Gemini[Restricted Gemini CLI workers]
   Engine --> Verify[Explicitly configured verification commands]
@@ -22,7 +25,9 @@ flowchart LR
 
 The application is a local process, not a service. Each profile owns configuration and runtime data. Identity, repository, board and sprint form a state scope; changing these opens a separate session database without deleting previous work. An OS advisory lock prevents two coordinators from supervising the same scope.
 
-Pydantic validates configuration and tickets. SQLite transactions guard state transitions and audit events; approval rows identify exact action, subject and SHA-256 fingerprint. The planner builds confirmed dependency edges, detects cycles with a deterministic topological pass, and separates overlapping declared paths. Mention-based recommendations remain advisory. Groups respect concurrency.
+Pydantic validates configuration and tickets. SQLite transactions guard state transitions and audit events; approval rows identify exact action, subject and SHA-256 fingerprint. The planner builds confirmed dependency edges, detects cycles with a deterministic topological pass, and separates overlapping declared paths. Mention-based recommendations remain advisory. Groups give the schedule order; the scheduler fills free worker slots in that order, never runs declared conflicts together, and wakes when a human approves a plan or accepts a prerequisite.
+
+With plan-first enabled, a ticket's first model turn is planning: read-only tools, OS write denial on the worktree, and a check that the worktree fingerprint is unchanged. The plan is stored with a fingerprint over its text, the ticket and the worktree, and the ticket waits in PLAN_REVIEW. Approving that fingerprint is the authorization to implement; comments queue a revised planning turn in the same native session; rejection cancels the ticket and keeps its worktree.
 
 Workers run in dedicated worktrees. A process guardian watches coordinator parentage and terminates its process group if the parent disappears. The coordinator captures stdout/stderr to local files, enforces timeouts and bounds retries. Restart marks unfinished tasks INTERRUPTED and requires human inspection and a fresh plan. Native Gemini session continuity is not assumed; ticket context and feedback are supplied again in the existing worktree.
 

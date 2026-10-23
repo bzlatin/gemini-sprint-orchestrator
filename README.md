@@ -1,108 +1,167 @@
 # Gemini Sprint Orchestrator
 
-A local, human-controlled sprint control center for Gemini CLI. Select assigned Jira tickets, inspect dependency plans, run isolated workers, verify changes and review them before optional remote publication.
+Pick your assigned Jira tickets, see which are ready and which wait on others, and let Gemini CLI work on each one in its own Git worktree — **planning first, coding only after you approve the plan**.
 
-**Version 0.4.0 is an MIT-licensed public alpha.** The offline demo is the supported starting point. Connected Gemini/Jira/hosting configurations require validation on the approved target system; this is not an enterprise security certification. See [release readiness](docs/release-readiness.md) and [known limitations](docs/limitations.md).
+```
+tickets ──► work ──► Gemini plans (read-only) ──► you approve / comment / reject ──► Gemini implements ──► you review & accept
+```
+
+**Version 0.5.0 is an MIT-licensed public alpha.** The offline demo is the supported starting point. Connected Gemini/Jira configurations need validation on your approved work system; this is not an enterprise security certification. See [release readiness](docs/release-readiness.md) and [known limitations](docs/limitations.md).
 
 ![Synthetic ticket explorer](docs/demo/01-selection.png)
 
-## Install and try the offline demo
+## Try it in one minute (offline demo)
 
-Python 3.11+ and Git are required on macOS or Linux. From this source checkout:
+Python 3.11+ and Git on macOS or Linux (Linux also needs `bubblewrap`):
 
 ```sh
-python3 -m venv .venv
-source .venv/bin/activate
+git clone https://github.com/bzlatin/gemini-sprint-orchestrator.git
+cd gemini-sprint-orchestrator
+python3 -m venv .venv && source .venv/bin/activate
 python -m pip install -c requirements.lock -e .
 gemini-orchestrator demo
 ```
 
-The demo needs no Gemini, Jira, company credentials or network. It creates synthetic tickets and a sample repository under `~/.local/share/gemini-orchestrator/runtime/demo/`. `GSO_HOME` or the global `--home` option selects another private local root. Demo does not change your active connected profile.
+Prefer to let Gemini do the install? See [Install or update with Gemini CLI](#install-or-update-with-gemini-cli).
 
-1. Select tickets with Space; choose **Save selection** and confirm.
-2. Choose **Propose plan**, inspect dependencies/branches/checks, then **Approve plan**.
-3. Separately choose **Approve launch**. Independent mock processes run concurrently in real worktrees.
-4. Load a ticket in **Review**. Inspect actual file changes, including new files, verification and diff; accept or request changes. Acceptance creates a local worker-branch commit.
-5. Approve another launch for dependent work after prerequisite acceptance. DEMO-6 stays blocked while its unavailable prerequisite is selected for planning.
+The demo uses synthetic tickets and a sample repository; no Gemini, Jira, credentials or network.
 
-The maintainer's [recorded walkthrough](docs/demo/README.md) exercised this lifecycle, change requests, continuation and restart recovery through the real Textual controls. To reproduce it in a new disposable directory:
+1. **Tickets** — Space selects tickets. The *Readiness* column shows `Ready` or `Waiting on KEY`. Optionally type branch names (`KEY=name`) in the branch field.
+2. **Start selected** — one confirmation shows every branch name, dependency and check. Gemini then drafts a read-only implementation plan for each ready ticket.
+3. **Plans** — load a plan and read it. **Approve plan** lets Gemini implement it; **Send comment** asks Gemini to revise it; **Reject plan** stops the ticket and keeps its worktree.
+4. **Review** — inspect the real diff and verification, then accept (a local commit on the ticket branch) or request changes.
+5. Tickets waiting on a prerequisite become `Ready` once you accept it; start them the same way.
 
-```sh
-python -m pip install -c requirements-dev.lock -e '.[dev]'
-python scripts/demo_walkthrough.py --output /tmp/my-synthetic-sprint-demo
-```
-
-## Worktree editor and shared conversations
-
-After launching a worker, open **Agents**, enter its ticket key, and choose **Open session** or **Open VS Code**. The **Sessions** tab also loads workers directly.
-
-- **Open VS Code** opens a separate window rooted in that ticket's recorded worktree and branch. It leaves the main checkout on its existing branch. A private generated workspace includes a **Gemini session: KEY** terminal task that connects to the same running coordinator.
-- Allow that workspace's automatic task when VS Code asks, or choose **Terminal → Run Task → Gemini session: KEY**. Workspace Trust and automatic-task preferences remain under your control. Install the `code` CLI on PATH if needed; the usual macOS application location is also detected. With Remote SSH, run the orchestrator in the same remote environment as the VS Code terminal.
-- In either view, inspect recent messages and output, type a follow-up, and confirm its exact ticket, worktree and verification commands. A follow-up starts another supervised coding turn, invalidates previous acceptance, reruns verification, and returns to human review.
-- Follow-ups run when the current batch is idle. Pause workers or let the batch finish first. This is conversation at turn boundaries; it does not inject keystrokes into an active headless CLI process.
-- When the installed CLI supports resume and returns a native session UUID, the next turn passes that exact UUID to Gemini. Older runs without an ID use clearly labelled saved conversation/task context. Resume failures remain visible and require attention.
-- Keep the main dashboard running. Closing the editor conversation view leaves its worker running; quitting the main dashboard stops its supervised workers. Session messages and replies persist in the profile's private runtime data.
-
-You can open the same conversation in another terminal:
+## The same flow from the CLI
 
 ```sh
-gemini-orchestrator --profile demo session DEMO-1
+gemini-orchestrator tickets                         # readiness of your sprint tickets
+gemini-orchestrator work APP-1 APP-2 --branch APP-1=feature/login
+gemini-orchestrator plan APP-1                      # read Gemini's plan
+gemini-orchestrator plan APP-1 --comment "Reuse the existing session store"
+gemini-orchestrator plan APP-1 --approve            # Gemini implements the approved plan
+gemini-orchestrator review APP-1 --accept
+gemini-orchestrator status                          # every ticket's next step
 ```
 
-See the [shared-session walkthrough](docs/demo/sessions/README.md) and [session guide](docs/sessions.md) for evidence and limits.
+Use `--profile demo` with the demo. Connected profiles add `--enable-connected` to commands that contact Jira or Gemini. `gemini-orchestrator --help` lists the core workflow first; everything else is under *Advanced*.
 
-## Isolated checks and read-only questions
+## Branch names
 
-Version 0.3.0 sandboxes verification, removes inherited secrets, isolates provider homes, protects editor/agent execution configuration, and binds editor credentials to one ticket. Linux needs working bubblewrap even for the demo. Use `ask KEY QUESTION` for an approved read-only model turn and `storage` to inspect disk use or explicitly prune historical logs. Existing profiles need fresh plan approval because the isolation settings change their configuration fingerprint. See the [hardening guide](docs/hardening.md) for authentication changes, limits and the target-machine validation harness.
+Branches come from a template you set during `setup` (default `{type}/{key}-{slug}`, e.g. `feature/APP-12-add-login` or `fix/APP-7-crash-on-empty-input`). Fields: `{key}`, `{slug}` (summary), `{type}` (`fix` for bugs, otherwise `feature`), `{id}` (short schedule id). You see and approve every name before work starts, and can override any of them. Protected and existing branches are refused.
+
+## Safety model
+
+- **You approve every consequential step:** starting work, each implementation plan, accepting code, and any optional push or draft PR. Approvals are bound to exact fingerprints; if the plan, ticket, worktree or settings change, approval is required again.
+- **Planning cannot edit code.** The planning turn runs with read-only tools and an OS sandbox that denies writes to the worktree; a changed worktree fails planning.
+- **Workers are sandboxed** (`sandbox-exec` on macOS, `bubblewrap` on Linux): only local read/edit tools, no shell, MCP, web or delegation; scrubbed environment; isolated provider home; one worktree per ticket.
+- **Jira is read-only.** Only exact known read tools are allowed; ticket content is passed to Gemini as untrusted data.
+- **Nothing leaves your machine without a separate approval.** No telemetry, Jira writes, automatic merges, pushes, deployments or worktree deletion.
+
+Details: [security](docs/security.md), [hardening](docs/hardening.md), [security policy](SECURITY.md).
 
 ## Connected setup
 
-On an approved work system:
+On an approved work system, run setup from inside the repository you want to work in:
 
 ```sh
-gemini-orchestrator setup
-gemini-orchestrator doctor
+cd path/to/your-project
+gemini-orchestrator setup          # a few questions: name, repo, branch naming, Jira, checks
 gemini-orchestrator jira test --enable-connected
 gemini-orchestrator start --enable-connected
 ```
 
-Version 0.4.0 adds Jira Server/Data Center compatibility through supported MCP tools, including legacy account names, missing annotation hints, alternate tool names and list search responses. Direct REST remains Jira Cloud only. See [integration compatibility](docs/integrations.md).
+Setup detects the repository, a worktree folder next to it, your Gemini CLI, the Jira server in your Gemini MCP settings and suggested checks. You confirm your Jira account, board and sprint yourself, and can change any default (team, hosting, concurrency, timeouts, plan-first) from the summary before saving. It finishes with local diagnostics; `doctor` reruns them.
 
-Setup can save local settings without connecting to Jira. It detects Gemini capabilities, confirms the authenticated account identifier, distinguishes team/project/board, discovers active sprints when supported, validates Git without changing the checkout, configures limits/checks, and keeps remote writes off. Do not transfer enterprise runtime data to this generic source repository or a personal machine.
+Jira Cloud, Server and Data Center work through supported MCP tools; direct REST is Jira Cloud only. See [integration compatibility](docs/integrations.md) and [enterprise deployment](docs/enterprise.md). Gemini runs with an isolated home; authenticate it once per ticket home as described in [hardening](docs/hardening.md).
 
-## CLI workflow
+## Updating
 
-Global options precede the subcommand: `gemini-orchestrator --profile personal status`.
+New versions are listed in the [changelog](CHANGELOG.md). Read it before updating: it calls out breaking changes and anything you need to redo (0.5.0, for example, renames `plan` to `schedule` and needs in-progress work started again).
+
+1. Quit the dashboard; this also stops its workers. Note any tickets you are mid-review on.
+2. Optionally back up your local data folder (`~/.local/share/gemini-orchestrator`, or `GSO_HOME`). Databases are not migrated automatically.
+3. Update the checkout and its dependencies:
 
 ```sh
-gemini-orchestrator profile list
-gemini-orchestrator profile create
-gemini-orchestrator profile switch personal
-gemini-orchestrator profile edit
-gemini-orchestrator tickets --refresh --enable-connected
-gemini-orchestrator select APP-1 APP-2
-gemini-orchestrator plan --approve
-gemini-orchestrator run --enable-connected
-gemini-orchestrator review APP-1
-gemini-orchestrator review APP-1 --accept
-gemini-orchestrator status
-gemini-orchestrator board
+cd gemini-sprint-orchestrator
+git pull
+source .venv/bin/activate
+python -m pip install -c requirements.lock -e .
+gemini-orchestrator doctor
 ```
 
-For a demo CLI workflow, use `demo --headless`, then `--profile demo` on each command; omit `--enable-connected`. Every consequential action still asks for explicit confirmation. Use `retry KEY` after feedback/interruption to propose continuation in the same worktree. Remote pushes and draft requests are disabled by default and each have a separate exact-commit/destination approval.
+To stay on a specific release instead of the latest `main`, check out its tag (for example `git checkout v0.5.0`, once releases are tagged) in place of `git pull`. Worktrees, branches and accepted commits are never deleted by an update.
 
-## Development and validation
+## Install or update with Gemini CLI
+
+Copy one of these prompts into Gemini CLI in a terminal. Gemini asks before each command it runs; read each one before allowing it. Gemini only installs or updates the tool. It never runs `setup` for you, because setup is where you confirm your Jira account and which commands may run on your code. If Gemini or its model is unavailable, use the manual steps above.
+
+<details>
+<summary>Install prompt</summary>
+
+```text
+Install the open-source "gemini-sprint-orchestrator" tool for me. Follow these rules:
+- Explain each shell command before running it and wait for my approval. Never use sudo
+  without asking me first.
+- Do not read, print, copy or edit credentials, tokens, ~/.gemini settings, or any files
+  under ~/.local/share/gemini-orchestrator.
+- If a step fails, stop and tell me the exact error and the likely fix. Do not work around
+  failures by skipping checks.
+
+Steps:
+1. Check that git and Python 3.11 or newer are installed. On Linux, also check that
+   `bwrap --version` works; if it does not, tell me the package to install (bubblewrap).
+2. Ask me where to install it (suggest ~/tools). Clone
+   https://github.com/bzlatin/gemini-sprint-orchestrator.git there.
+3. In the clone, create a virtual environment with `python3 -m venv .venv`, then run
+   `.venv/bin/python -m pip install -c requirements.lock -e .`.
+4. Verify with `.venv/bin/gemini-orchestrator test` and `.venv/bin/gemini-orchestrator
+   --home "$(mktemp -d)" demo --headless`.
+5. Ask whether I want the command on my PATH. If yes, and ~/.local/bin is on PATH, create a
+   symlink from ~/.local/bin/gemini-orchestrator to the .venv/bin/gemini-orchestrator file.
+6. Finish by telling me to run `gemini-orchestrator demo` to try it, and to run
+   `gemini-orchestrator setup` myself from inside my project's repository. Do not run setup.
+```
+
+</details>
+
+<details>
+<summary>Update prompt</summary>
+
+```text
+Update my existing "gemini-sprint-orchestrator" installation. Follow these rules:
+- Explain each shell command before running it and wait for my approval.
+- Do not read, print, copy or edit credentials, tokens, ~/.gemini settings, or any files
+  under ~/.local/share/gemini-orchestrator. Never delete worktrees or branches.
+- If a step fails, stop and tell me the exact error and the likely fix.
+
+Steps:
+1. Ask me where it is installed (look for a gemini-sprint-orchestrator clone, e.g. in ~/tools).
+2. Make sure the gemini-orchestrator dashboard is not running (ask me to quit it if it is).
+3. In the clone, run `git status`. If there are local changes, stop and ask me what to do.
+4. Run `git fetch --tags`, show me the CHANGELOG.md entries newer than my current version
+   (shown in src/gemini_orchestrator/__init__.py), and
+   summarize any breaking changes or steps I must redo.
+5. After I confirm, run `git pull`, then
+   `.venv/bin/python -m pip install -c requirements.lock -e .`.
+6. Verify with `.venv/bin/gemini-orchestrator test` and `.venv/bin/gemini-orchestrator doctor`,
+   and report the results.
+```
+
+</details>
+
+## More
+
+- [User guide](docs/guide.md) · [sessions and VS Code](docs/sessions.md) · [architecture](docs/architecture.md)
+- [Recorded demo walkthrough](docs/demo/README.md) · [changelog](CHANGELOG.md)
+
+## Development
 
 ```sh
 python -m pip install -c requirements-dev.lock -e '.[dev]'
 python -m pytest
-ruff check .
-ruff format --check .
+ruff check . && ruff format --check .
 mypy src/gemini_orchestrator
-python -m build --no-isolation
-gemini-orchestrator test
+python scripts/demo_walkthrough.py --output /tmp/new-walkthrough-dir
 ```
-
-Runtime and development constraints record tested versions. [Security policy](SECURITY.md), [dependency inventory](docs/security/runtime-sbom.json), [validation evidence](docs/validation.md), and [changelog](CHANGELOG.md) describe the release scope. The project adds no telemetry, Jira mutations, automatic merges/deployments, or automatic worktree deletion. Gemini and configured external tools retain their own approved settings and policies.
-
-See [architecture](docs/architecture.md), [user guide](docs/guide.md), [integration compatibility](docs/integrations.md), and [enterprise deployment](docs/enterprise.md).

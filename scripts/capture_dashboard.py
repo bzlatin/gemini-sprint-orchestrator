@@ -24,14 +24,12 @@ async def capture():
             async with app.run_test(size=(width, height)) as pilot:
                 await pilot.pause()
                 app.save_screenshot(f"dashboard-{width}.svg", path="docs")
-                engine.select(["DEMO-1", "DEMO-2", "DEMO-3"], "Demo Human")
-                app.action_plan()
+                app.selected = {"DEMO-1", "DEMO-2", "DEMO-3"}
+                app.action_start()
                 await pilot.pause()
-                for selector in ("#approve-plan", "#launch", "#plan-text", "#planner", "#notice"):
-                    widget = app.query_one(selector)
-                    print(width, selector, widget.region, widget.visible, widget.display)
+                # The single start confirmation shows readiness and branch names.
                 app.save_screenshot(f"planner-{width}.svg", path="docs")
-                print("click:", await pilot.click("#approve-plan"))
+                print("click:", await pilot.click("#back"))
                 await pilot.pause()
                 print("screen:", app.screen, "notice:", app.query_one("#notice").render())
                 await app.action_quit()

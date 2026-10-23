@@ -13,11 +13,10 @@ from rich.prompt import Confirm, Prompt
 
 from .config import Profiles
 from .gemini import Gemini
-from .git import Git
+from .git import Git, command
 from .jira import Jira, JiraConnection
 from .models import (
     Check,
-    GeminiSettings,
     Identity,
     OrchestratorError,
     Profile,
@@ -141,11 +140,14 @@ def configure_mcp_settings(profile: Profile) -> bool:
             console.print(f"Settings unavailable: {exc}. Choose another file, or enter later.")
             continue
         console.print("Configured server names: " + ", ".join(names))
+        jira_like = [n for n in names if any(word in n.lower() for word in ("jira", "atlassian"))]
         default = (
             profile.jira.server
             if profile.jira.server in names
             else names[0]
             if len(names) == 1
+            else jira_like[0]
+            if len(jira_like) == 1
             else None
         )
         while True:
@@ -177,57 +179,174 @@ def tooling(repository: Path) -> list[str]:
 
 
 def configure_checks(profile: Profile) -> None:
-    suggestions = tooling(profile.repository)
-    console.print("Detected suggestions (not executed): " + (", ".join(suggestions) or "none"))
-    console.print(
-        "Verification commands run only after plan and worker-launch approval. Enter executable arguments; no shell expansion."
-    )
+    # Only suggest commands whose program exists; nothing runs during setup.
+    suggestions = [
+        hint
+        for hint in tooling(profile.repository)
+        if shlex.split(hint)[0] in {"python", "python3"} or shutil.which(shlex.split(hint)[0])
+    ]
     checks: list[Check] = []
-    while Confirm.ask("Configure a verification check?", default=False):
-        name = Prompt.ask(
-            "Check name (unit / integration / lint / types / build / smoke / reviewer)"
+    if suggestions:
+        console.print("Suggested verification checks (not run now):")
+        for hint in suggestions:
+            console.print(f"  {hint}")
+        if Confirm.ask(
+            "Use these checks? They run sandboxed, without network, after you approve work",
+            default=True,
+        ):
+            checks = [Check(name=hint, argv=shlex.split(hint)) for hint in suggestions]
+    while Confirm.ask("Add a custom verification check?", default=False):
+        name = Prompt.ask("Check name (unit / lint / types / build / smoke)")
+        argv = shlex.split(Prompt.ask("Command (arguments only; no shell expansion)"))
+        checks.append(
+            Check(
+                name=name,
+                argv=argv,
+                required=Confirm.ask("Required?", default=True),
+                timeout=typer.prompt("Timeout seconds", default=300, type=int),
+            )
         )
-        argv = shlex.split(Prompt.ask("Command"))
-        check = Check(
-            name=name,
-            argv=argv,
-            required=Confirm.ask("Required?", default=True),
-            timeout=typer.prompt("Timeout seconds", default=300, type=int),
-        )
-        checks.append(check)
     profile.checks = checks
+
+
+def git_setting(key: str) -> str:
+    try:
+        return command(["git", "config", "--get", key])
+    except OrchestratorError:
+        return ""
+
+
+def current_repository() -> Path:
+    try:
+        return Path(command(["git", "rev-parse", "--show-toplevel"], cwd=Path.cwd()))
+    except OrchestratorError:
+        return Path.cwd()
+
+
+def configure_gemini(profile: Profile) -> None:
+    executable = shutil.which(profile.gemini.executable) or shutil.which("gemini")
+    if not executable:
+        executable = Prompt.ask(
+            "Gemini CLI was not found on PATH. Path to the gemini executable", default="gemini"
+        )
+    profile.gemini.executable = executable
+    try:
+        capabilities = Gemini(executable).inspect()
+        missing = [flag for flag in ("prompt", "json", "admin_policy") if not capabilities[flag]]
+        console.print(
+            f"Gemini CLI {capabilities['version']} at {executable}"
+            + (f"; missing worker support: {', '.join(missing)}" if missing else "")
+        )
+    except OrchestratorError as exc:
+        console.print(
+            f"Gemini unavailable: {exc}. Install and sign in to Gemini CLI, then run doctor."
+        )
+
+
+def configure_branches(profile: Profile) -> None:
+    while True:
+        template = Prompt.ask(
+            "Branch naming ({key} {slug} {type} {id}; you approve every name before work starts)",
+            default=profile.branch_template,
+        )
+        try:
+            profile.branch_template = Profile.known_branch_fields(template)
+            return
+        except ValueError as exc:
+            console.print(str(exc))
+
+
+def connect_jira(profile: Profile) -> None:
+    default = "mcp" if profile.jira.settings_path.is_file() else "later"
+    adapter = Prompt.ask("Jira connection", choices=["mcp", "rest", "later"], default=default)
+    if adapter == "later":
+        return
+    profile.jira.adapter = "rest" if adapter == "rest" else "mcp"
+    if adapter == "mcp":
+        console.print("Choose the exact Jira MCP server from your Gemini settings.")
+        configured = configure_mcp_settings(profile)
+    else:
+        configured = True
+        profile.jira.base_url = Prompt.ask("Jira HTTPS base URL", default=profile.jira.base_url)
+        console.print(
+            "Credentials stay in environment variables; this wizard never asks for tokens."
+        )
+        profile.jira.token_env = Prompt.ask(
+            "Token environment variable", default=profile.jira.token_env
+        )
+        profile.jira.email_env = Prompt.ask(
+            "Email environment variable (optional for bearer)", default=profile.jira.email_env
+        )
+    while configured and Confirm.ask(
+        "Verify your Jira identity and choose your board and sprint now? This contacts Jira.",
+        default=True,
+    ):
+        try:
+            asyncio.run(configure_jira(profile))
+            break
+        except Exception as exc:
+            console.print(f"Jira verification failed: {exc}. Retry, or continue and connect later.")
+
+
+def summary(profile: Profile) -> str:
+    jira = (
+        f"{profile.jira.adapter} {profile.jira.server or profile.jira.base_url or ''}".strip()
+        if profile.identity.account_id or profile.jira.server or profile.jira.base_url
+        else "not connected"
+    )
+    identity = profile.identity.display_name or profile.identity.account_id
+    return "\n".join(
+        [
+            f"Profile {profile.name}",
+            f"  You:         {profile.display_name}"
+            + (f" · team {profile.team}" if profile.team else ""),
+            f"  Repository:  {profile.repository}",
+            f"  Worktrees:   {profile.worktrees}",
+            f"  Gemini:      {profile.gemini.executable} · {profile.gemini.concurrency} parallel · "
+            f"{profile.gemini.timeout}s timeout · "
+            + ("plan first" if profile.gemini.plan_first else "implement directly"),
+            f"  Branches:    {profile.branch_template}",
+            f"  Jira:        {jira}"
+            + (f" · verified as {identity}" if identity else " · identity not verified")
+            + (f" · board {profile.board_id}" if profile.board_id else "")
+            + (f" · sprint {profile.sprint.name}" if profile.sprint else ""),
+            "  Checks:      " + (", ".join(c.name for c in profile.checks) or "manual review only"),
+            f"  Hosting:     {profile.hosting} (remote writes off)",
+        ]
+    )
 
 
 def wizard(
     profiles: Profiles, name: str | None = None, *, existing: Profile | None = None
 ) -> Profile:
-    console.print("Welcome to Gemini Sprint Orchestrator.\nSetup never launches coding agents.")
+    console.print(
+        "Welcome to Gemini Sprint Orchestrator. A few questions; everything else has a safe "
+        "default you can change before saving. Setup never launches coding agents."
+    )
     name = name or Prompt.ask("Profile name", default=existing.name if existing else "personal")
     assert name is not None
     if not existing and name in profiles.names():
         raise OrchestratorError("Profile exists; use profile edit")
     display_name = Prompt.ask(
-        "What should we call you?", default=existing.display_name if existing else "Developer"
+        "What should we call you?",
+        default=existing.display_name if existing else git_setting("user.name") or "Developer",
     )
-    email = Prompt.ask("Optional email address", default=(existing.email or "") if existing else "")
     repository = (
         Path(
             Prompt.ask(
-                "Existing local Git repository",
-                default=str(existing.repository) if existing else str(Path.cwd()),
+                "Git repository to work in",
+                default=str(existing.repository if existing else current_repository()),
             )
         )
         .expanduser()
         .resolve()
     )
     Git(repository).validate()
-    default_worktrees = repository.parent / f"{repository.name}-worktrees"
-    worktrees = Path(
-        Prompt.ask(
-            "Worktree directory (outside checkout)",
-            default=str(existing.worktrees if existing else default_worktrees),
-        )
-    ).expanduser()
+    worktrees = (
+        existing.worktrees
+        if existing and existing.repository == repository
+        else repository.parent / f"{repository.name}-worktrees"
+    )
     profile = (
         existing.model_copy(deep=True)
         if existing
@@ -235,95 +354,32 @@ def wizard(
             name=name, display_name=display_name, repository=repository, worktrees=worktrees
         )
     )
-    profile.display_name, profile.email = display_name, email or None
+    profile.display_name = display_name
     profile.repository, profile.worktrees = repository, worktrees.resolve()
     profile.mode = "connected"
-    profile.team = Prompt.ask("Team name (separate from board/project)", default=profile.team)
-    executable = Prompt.ask(
-        "Gemini executable", default=shutil.which("gemini") or profile.gemini.executable
-    )
-    try:
-        gemini = Gemini(executable)
-        console.print(json.dumps(gemini.inspect(), indent=2))
-    except OrchestratorError as exc:
-        console.print(
-            f"Gemini unavailable: {exc}. Install/authenticate Gemini CLI on the approved target system."
-        )
-    profile.gemini = GeminiSettings(
-        executable=executable,
-        concurrency=typer.prompt(
-            "Maximum parallel agents", default=profile.gemini.concurrency, type=int
-        ),
-        timeout=typer.prompt("Worker timeout seconds", default=profile.gemini.timeout, type=int),
-        retries=typer.prompt("Bounded worker retries", default=profile.gemini.retries, type=int),
-        behavior=Prompt.ask("Preferred worker behavior", default=profile.gemini.behavior),
-        use_instructions=Confirm.ask("Use existing GEMINI.md?", default=True),
-        reuse_skills=False,
-    )
-    console.print(
-        "Custom skills/agents are detected by Gemini itself, but reuse is disabled until their permissions can be safely restricted."
-    )
-    adapter = Prompt.ask("Jira connection", choices=["mcp", "rest", "later"], default="later")
-    if adapter != "later":
-        profile.jira.adapter = "rest" if adapter == "rest" else "mcp"
-        if adapter == "mcp":
-            console.print(
-                "MCP connectivity can contact configured services. Use this only in an approved environment."
-            )
-            configured = configure_mcp_settings(profile)
-            if configured and Confirm.ask(
-                "Discover MCP servers now in this approved environment?", default=False
-            ):
-                try:
-                    console.print(Gemini(executable).servers())
-                except OrchestratorError as exc:
-                    console.print(str(exc))
-        else:
-            configured = True
-            profile.jira.base_url = Prompt.ask("Jira HTTPS base URL", default=profile.jira.base_url)
-            console.print(
-                "Credentials stay in environment variables; this wizard never asks for tokens."
-            )
-            profile.jira.token_env = Prompt.ask(
-                "Token environment variable", default=profile.jira.token_env
-            )
-            profile.jira.email_env = Prompt.ask(
-                "Email environment variable (optional for bearer)", default=profile.jira.email_env
-            )
-        while configured and Confirm.ask(
-            "Verify Jira identity and discover resources now? This accesses the configured service.",
-            default=False,
-        ):
-            try:
-                asyncio.run(configure_jira(profile))
-                break
-            except Exception as exc:
-                console.print(
-                    f"Jira verification failed: {exc}. Retry or continue configuring local settings."
-                )
+    profile.gemini.reuse_skills = False
+    configure_gemini(profile)
+    configure_branches(profile)
+    connect_jira(profile)
     if not profile.identity.account_id:
         console.print(
-            "Jira identity remains unverified. Ticket retrieval is disabled until setup confirms authentication."
+            "Jira identity is not verified yet; ticket retrieval stays off until you connect."
         )
     configure_checks(profile)
-    profile.hosting = Prompt.ask(
-        "Git hosting", choices=["local", "github", "gitlab"], default=profile.hosting
-    )
-    tool = {"github": "gh", "gitlab": "glab"}.get(profile.hosting)
-    if tool:
-        console.print(f"{tool}: {shutil.which(tool) or 'not installed'}")
     profile.remote_writes = False
     while True:
-        console.print(profile.model_dump_json(indent=2))
+        console.print(summary(profile))
         field = Prompt.ask(
-            "Edit a setting before save",
+            "Save, or change a setting",
             choices=[
                 "save",
+                "cancel",
                 "identity",
                 "team",
                 "jira",
                 "repository",
                 "gemini",
+                "branches",
                 "checks",
                 "hosting",
             ],
@@ -331,33 +387,72 @@ def wizard(
         )
         if field == "save":
             break
+        if field == "cancel":
+            raise OrchestratorError("Configuration was not saved")
         if field == "identity":
             profile.display_name = Prompt.ask("Display name", default=profile.display_name)
+            profile.email = (
+                Prompt.ask("Optional email address", default=profile.email or "") or None
+            )
         elif field == "team":
-            profile.team = Prompt.ask("Team", default=profile.team)
+            profile.team = Prompt.ask("Team (separate from board/project)", default=profile.team)
         elif field == "jira":
-            if Confirm.ask("Connect to Jira now in an approved environment?", default=False):
-                asyncio.run(configure_jira(profile))
+            connect_jira(profile)
         elif field == "repository":
             profile.repository = Path(Prompt.ask("Repository path")).expanduser().resolve()
             Git(profile.repository).validate()
-            profile.worktrees = Path(Prompt.ask("Worktree directory")).expanduser().resolve()
+            profile.worktrees = (
+                Path(
+                    Prompt.ask(
+                        "Worktree directory (outside the checkout)",
+                        default=str(
+                            profile.repository.parent / f"{profile.repository.name}-worktrees"
+                        ),
+                    )
+                )
+                .expanduser()
+                .resolve()
+            )
         elif field == "gemini":
-            profile.gemini.concurrency = typer.prompt("Concurrency", default=2, type=int)
-            profile.gemini.timeout = typer.prompt("Worker timeout", default=1800, type=int)
+            configure_gemini(profile)
+            profile.gemini.concurrency = typer.prompt(
+                "Maximum parallel agents", default=profile.gemini.concurrency, type=int
+            )
+            profile.gemini.timeout = typer.prompt(
+                "Worker timeout seconds", default=profile.gemini.timeout, type=int
+            )
+            profile.gemini.retries = typer.prompt(
+                "Bounded worker retries", default=profile.gemini.retries, type=int
+            )
+            profile.gemini.behavior = Prompt.ask(
+                "Preferred worker behavior", default=profile.gemini.behavior
+            )
+            profile.gemini.use_instructions = Confirm.ask(
+                "Follow the repository's GEMINI.md?", default=profile.gemini.use_instructions
+            )
+            profile.gemini.plan_first = Confirm.ask(
+                "Plan first and wait for approval before coding?",
+                default=profile.gemini.plan_first,
+            )
+        elif field == "branches":
+            configure_branches(profile)
         elif field == "checks":
             configure_checks(profile)
         elif field == "hosting":
-            profile.hosting = Prompt.ask("Hosting", choices=["local", "github", "gitlab"])
+            profile.hosting = Prompt.ask(
+                "Git hosting", choices=["local", "github", "gitlab"], default=profile.hosting
+            )
+            tool = {"github": "gh", "gitlab": "glab"}.get(profile.hosting)
+            if tool:
+                console.print(f"{tool}: {shutil.which(tool) or 'not installed'}")
     profile = Profile.model_validate(profile.model_dump())
-    if not Confirm.ask("Save this local configuration?", default=True):
-        raise OrchestratorError("Configuration was not saved")
     profiles.save(profile)
     profiles.switch(profile.name)
     console.print(f"Saved profile {profile.name} with restrictive local permissions.")
-    if Confirm.ask("Run local diagnostics now? (No Jira network access)", default=True):
-        for name, status in diagnostics(profile).items():
-            console.print(f"{name}: {status}")
+    # Local diagnostics only: no Jira or model access.
+    for item, status in diagnostics(profile).items():
+        console.print(f"{item}: {status}")
+    console.print("Next: gemini-orchestrator start --enable-connected")
     return profile
 
 

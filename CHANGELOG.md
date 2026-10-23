@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0 — plan first, simpler flow
+
+- Every ticket's first Gemini turn now drafts a detailed implementation plan from the full Jira ticket, with read-only tools and OS write denial. Coding starts only after a human approves that exact plan; comments make Gemini revise it in the same session, and rejecting stops the ticket and keeps its worktree.
+- New `work KEY...` and `plan KEY [--approve|--comment|--reject]` commands; the dashboard has **Start selected** and a **Plans** tab. One confirmation replaces the separate select, plan-approval and launch-approval steps.
+- Branch names come from a configurable `branch_template` (default `{type}/{key}-{slug}`) and can be overridden per ticket; every name is shown before work starts. Branches no longer need the `gso/` prefix; protected and existing branches are still refused.
+- Ticket lists and `status` show readiness (`Ready` / `Waiting on KEY`) and each ticket's next step. Accepted prerequisites no longer block a newly started dependent.
+- The scheduler fills free worker slots as plans are approved or prerequisites accepted, instead of running fixed groups.
+- The old dependency `plan` command is now `schedule`; less common commands are listed under *Advanced* in `--help`.
+- Shorter setup: only name, repository, branch naming, Jira and checks are asked; the repository, worktree folder, Gemini CLI, Jira MCP server and suggested checks are detected, and everything else is editable from a compact summary.
+- README now covers updating, plus copy-paste Gemini CLI prompts that install or update the tool (setup itself stays a human-run wizard).
+- Existing profiles gain `plan_first` and `branch_template`, which changes their configuration fingerprint, so start work again after upgrading.
+
 ## 0.4.0 — Jira MCP compatibility
 
 - Added Jira Server/Data Center account-name/key normalization and common search/project tool aliases.

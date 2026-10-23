@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from capture_utils import sanitize_svg
-from textual.widgets import Button, DataTable, Input, Static, TabbedContent
+from textual.widgets import Button, DataTable, Input, TabbedContent
 
 from gemini_orchestrator.config import Profiles
 from gemini_orchestrator.dashboard import Confirmation, Dashboard
@@ -60,7 +60,30 @@ async def walkthrough(directory: Path) -> dict[str, object]:
         def capture(name: str) -> None:
             app.save_screenshot(name + ".svg", path=str(captures))
 
-        # Select through the explorer keyboard, then confirm the exact selection.
+        async def load_plan(key: str) -> None:
+            await tab("planner", "plan-key")
+            app.query_one("#plan-key", Input).value = key
+            await press("load-plan")
+
+        async def approve_plan(key: str) -> None:
+            await wait_state(key, State.PLAN_REVIEW)
+            await load_plan(key)
+            await press("approve-plan")
+            await confirm()
+
+        async def load_review(key: str) -> None:
+            await tab("review", "review-key")
+            app.query_one("#review-key", Input).value = key
+            await press("load-review")
+
+        async def start(keys: set[str]) -> None:
+            await tab("explorer", "tickets")
+            app.selected = set(keys)
+            app.render_tickets()
+            await press("start")
+            await confirm()
+
+        # Select through the explorer keyboard, then confirm branches and readiness once.
         table = app.query_one("#tickets", DataTable)
         table.focus()
         for index in range(6):
@@ -69,35 +92,41 @@ async def walkthrough(directory: Path) -> dict[str, object]:
             if index < 5:
                 await pilot.press("down")
         assert app.selected == {"DEMO-1", "DEMO-2", "DEMO-3", "DEMO-6"}
-        await press("save-selection")
-        await confirm()
         capture("01-selection")
-        steps.append("Selected four tickets through the explorer; exact selection confirmed")
+        await press("start")
+        assert isinstance(app.screen, Confirmation)
+        await confirm()
+        steps.append("Selected four tickets; one confirmation approved readiness and branch names")
 
-        await press("propose")
-        capture("02-plan")
-        await press("approve-plan")
-        await confirm()
-        assert not engine.supervisor.running
-        steps.append("Inspected plan; plan approval alone did not launch workers")
-        await press("launch")
-        await confirm()
-        await wait_state("DEMO-1", State.READY_FOR_REVIEW)
-        await wait_state("DEMO-2", State.READY_FOR_REVIEW)
+        await wait_state("DEMO-1", State.PLAN_REVIEW)
+        await wait_state("DEMO-2", State.PLAN_REVIEW)
         assert engine.store.row("DEMO-3")["state"] == State.BLOCKED
         assert engine.store.row("DEMO-6")["state"] == State.BLOCKED
+        assert not (Path(engine.store.row("DEMO-1")["worktree"]) / "src/help.py").exists()
+        await load_plan("DEMO-1")
+        capture("02-plan")
+        app.query_one("#plan-comment").load_text("Mention keyboard shortcuts (synthetic comment)")
+        await press("comment-plan")
+        await confirm()
+        async with asyncio.timeout(20):
+            while "keyboard shortcuts" not in str(engine.implementation_plan("DEMO-1")["text"]):
+                await pilot.pause(0.1)
+        steps.append(
+            "Gemini planned ready tickets read-only; a human comment produced a revised plan"
+        )
+
+        await approve_plan("DEMO-1")
+        await approve_plan("DEMO-2")
+        await wait_state("DEMO-1", State.READY_FOR_REVIEW)
+        await wait_state("DEMO-2", State.READY_FOR_REVIEW)
         summary["blocked_after_first_batch"] = {
             key: engine.store.row(key)["state"] for key in ("DEMO-3", "DEMO-6")
         }
+        await tab("agents", "agent-key")
         capture("03-workers-and-blockers")
         steps.append(
-            "Independent workers finished in real worktrees; downstream and external blockers held"
+            "Approved plans were implemented in real worktrees; downstream and external blockers held"
         )
-
-        async def load_review(key: str) -> None:
-            await tab("review", "review-key")
-            app.query_one("#review-key", Input).value = key
-            await press("load-review")
 
         for key in ("DEMO-1", "DEMO-2"):
             await load_review(key)
@@ -107,19 +136,16 @@ async def walkthrough(directory: Path) -> dict[str, object]:
             await press("accept")
             await confirm()
             assert engine.store.row(key)["state"] == State.APPROVED
-        steps.append(
-            "Inspected actual review evidence and accepted both prerequisites through separate human gates"
-        )
+        steps.append("Inspected actual review evidence and accepted both prerequisites")
 
-        await tab("planner", "launch")
-        await press("launch")
-        await confirm()
+        await start({"DEMO-3"})
+        await approve_plan("DEMO-3")
         await wait_state("DEMO-3", State.READY_FOR_REVIEW)
         await load_review("DEMO-3")
         await press("accept")
         await confirm()
         steps.append(
-            "Launched dependent work only after prerequisite acceptance; verified and accepted it"
+            "Dependent work was planned and implemented only after prerequisite acceptance"
         )
 
         # Exercise feedback and continuation in the same worktree.
@@ -130,23 +156,7 @@ async def walkthrough(directory: Path) -> dict[str, object]:
         ).value = "Include a clearer installation example (synthetic feedback)"
         await press("request-changes")
         await confirm()
-        await tab("explorer", "tickets")
-        # Clear the stale pending picks through normal toggle controls.
-        for index in range(6):
-            table.move_cursor(row=index)
-            await pilot.pause()
-            key = str(table.get_row_at(index)[1])
-            desired = key == "DEMO-2"
-            if (key in app.selected) != desired:
-                table.focus()
-                await pilot.press("space")
-        await press("save-selection")
-        await confirm()
-        await press("propose")
-        await press("approve-plan")
-        await confirm()
-        await press("launch")
-        await confirm()
+        await start({"DEMO-2"})
         await wait_state("DEMO-2", State.READY_FOR_REVIEW)
         assert engine.store.row("DEMO-2")["worktree"] == original_worktree
         await load_review("DEMO-2")
@@ -154,11 +164,7 @@ async def walkthrough(directory: Path) -> dict[str, object]:
         await confirm()
         capture("05-accepted-continuation")
         steps.append(
-            "Requested changes, approved a fresh plan/launch and accepted continuation in the original worktree"
-        )
-        assert (
-            "Batch finished" in str(app.query_one("#notice", Static).render())
-            or engine.store.row("DEMO-2")["state"] == State.APPROVED
+            "Requested changes; the approved plan was continued in the original worktree and accepted"
         )
         await app.action_quit()
 

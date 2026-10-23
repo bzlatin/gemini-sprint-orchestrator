@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -72,7 +73,7 @@ class Dashboard(App[None]):
     #overview { height: 3; padding: 0 2; color: #b7c8cf; }
     #tickets { height: 1fr; min-height: 3; }
     #search { width: 1fr; }
-    #priority, #status-filter { width: 22; }
+    #priority, #status-filter { width: 16; }
     .filters { height: 3; }
     .actions { height: auto; min-height: 3; layout: horizontal; overflow-x: auto; }
     Button { margin-right: 1; min-width: 12; }
@@ -82,7 +83,8 @@ class Dashboard(App[None]):
     #plan-text, #agent-text, #review-text, #activity-text, #approval-text { height: auto; min-height: 4; }
     #notice { height: 2; padding-left: 2; color: #ffd28a; }
     #settings-json { height: 1fr; min-height: 10; }
-    #feedback, #review-key { width: 1fr; }
+    #feedback, #review-key, #plan-key, #branch-overrides { width: 1fr; }
+    #plan-comment { height: 5; }
     TabPane { padding: 1; height: 1fr; min-height: 0; overflow: hidden; }
     DataTable { background: #101820; }
     Input:focus { border: tall #6de0cb; }
@@ -90,9 +92,8 @@ class Dashboard(App[None]):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("space", "toggle_ticket", "Select ticket"),
-        Binding("p", "plan", "Plan"),
+        Binding("s", "start", "Start selected"),
         Binding("r", "refresh", "Refresh"),
-        Binding("ctrl+s", "save_selection", "Save selection"),
     ]
 
     def __init__(self, engine: Engine, profiles: Profiles, connected_enabled: bool = False):
@@ -107,6 +108,7 @@ class Dashboard(App[None]):
         self.execution_task: asyncio.Task[None] | None = None
         self.last_view = ""
         self.loaded_review: tuple[str, str] | None = None
+        self.loaded_plan: tuple[str, str] | None = None
         self.loaded_session = ""
         self.session_drafts: dict[str, str] = {}
         self.bridge = SessionBridge(engine, connected_enabled=connected_enabled)
@@ -120,6 +122,7 @@ class Dashboard(App[None]):
                     yield Input(placeholder="Search key or summary", id="search")
                     yield Input(placeholder="Priority", id="priority")
                     yield Input(placeholder="Status", id="status-filter")
+                    yield Input(placeholder="Branches: KEY=name, …", id="branch-overrides")
                 yield DataTable(id="tickets", cursor_type="row", zebra_stripes=True)
                 with VerticalScroll(id="details-scroll", can_focus=True):
                     yield Static(
@@ -129,19 +132,23 @@ class Dashboard(App[None]):
                     )
                 with Horizontal(classes="actions"):
                     yield Button("Toggle ticket", id="toggle")
-                    yield Button("Save selection", id="save-selection", variant="primary")
-                    yield Button("Propose plan", id="propose")
+                    yield Button("Start selected", id="start", variant="primary")
                     yield Button("Refresh", id="refresh")
                     yield Button("Sort priority", id="sort-priority")
-                    yield Button("Defer ticket", id="defer")
-            with TabPane("Plan", id="planner"):
+            with TabPane("Plans", id="planner"):
+                with Horizontal(classes="filters"):
+                    yield Input(placeholder="Ticket key, e.g. DEMO-1", id="plan-key")
+                    yield Button("Load plan", id="load-plan")
                 with VerticalScroll(classes="document"):
                     yield Static(
-                        "Select tickets, then propose a plan.", id="plan-text", markup=False
+                        "Start tickets; Gemini's implementation plans appear here for review.",
+                        id="plan-text",
+                        markup=False,
                     )
+                yield TextArea(id="plan-comment")
                 with Horizontal(classes="actions"):
-                    yield Button("Approve plan", id="approve-plan", variant="primary")
-                    yield Button("Approve launch", id="launch", variant="success")
+                    yield Button("Approve plan", id="approve-plan", variant="success")
+                    yield Button("Send comment", id="comment-plan", variant="primary")
                     yield Button("Reject plan", id="reject-plan")
             with TabPane("Agents", id="agents"):
                 with VerticalScroll(classes="document"):
@@ -216,7 +223,9 @@ class Dashboard(App[None]):
     async def on_mount(self) -> None:
         self.on_resize()
         table = self.query_one("#tickets", DataTable)
-        table.add_columns("Pick", "Ticket", "Lifecycle", "Priority", "Summary", "Jira status")
+        table.add_columns(
+            "Pick", "Ticket", "Lifecycle", "Readiness", "Priority", "Summary", "Jira status"
+        )
         self.render_tickets()
         self.update_views()
         self.set_interval(0.5, self.update_views)
@@ -312,6 +321,7 @@ class Dashboard(App[None]):
                         "[x]" if ticket.key in self.selected else "[ ]",
                         ticket.key,
                         row["state"],
+                        self.engine.readiness(ticket.key),
                         ticket.priority,
                         ticket.summary,
                         ticket.status,
@@ -342,13 +352,7 @@ class Dashboard(App[None]):
         cursor = self.query_one("#tickets", DataTable).cursor_row
         self.render_tickets()
         self.query_one("#tickets", DataTable).move_cursor(row=cursor)
-
-    def action_save_selection(self) -> None:
-        keys = sorted(self.selected)
-        self.confirm(
-            "Save this exact ticket selection?\n" + (", ".join(keys) or "Empty selection"),
-            lambda: self.engine.select(keys, self.engine.profile.display_name),
-        )
+        self.update_views(force=True)
 
     def confirm(self, message: str, callback: Callable[[], Any]) -> None:
         def done(approved: bool | None) -> None:
@@ -362,42 +366,95 @@ class Dashboard(App[None]):
 
         self.push_screen(Confirmation(message), done)
 
-    def action_plan(self) -> None:
+    def branch_overrides(self) -> dict[str, str]:
+        overrides = {}
+        for item in self.query_one("#branch-overrides", Input).value.split(","):
+            if not item.strip():
+                continue
+            key, separator, name = item.partition("=")
+            if not separator or not name.strip():
+                raise OrchestratorError("Write branch names as KEY=name, separated by commas")
+            overrides[key.strip().upper()] = name.strip()
+        return overrides
+
+    def action_start(self) -> None:
+        keys = sorted(self.selected)
+        if not keys:
+            self.notice("Select tickets with Space first.")
+            return
         try:
-            plan = self.engine.propose()
-            text = (
-                f"Plan {plan.id} · base {plan.base[:12]} · fingerprint {plan.fingerprint[:16]}\n\n"
+            preview = self.engine.preview(
+                keys, branches=self.branch_overrides(), plan_id=uuid.uuid4().hex[:12]
             )
-            for index, group in enumerate(plan.groups, 1):
-                text += (
-                    f"Group {index}: "
-                    + ", ".join(f"slot {slot}: {key}" for slot, key in enumerate(group, 1))
-                    + "\n"
-                )
-            text += "\nBlocked:\n" + (
-                "\n".join(f"{key}: {reason}" for key, reason in plan.blocked.items()) or "None"
-            )
-            text += "\n\nDependencies and conflicts:\n" + (
-                "\n".join(
-                    f"{edge.prerequisite} → {edge.dependent} [{edge.kind}] {edge.reason}"
-                    for edge in plan.edges
-                )
-                or "Independent selected tasks; code conflicts remain unknown without semantic analysis."
-            )
-            text += "\n\nBranches / worktrees:\n" + "\n".join(
-                f"{key}\n  {plan.branches[key]}\n  {plan.worktrees[key]}" for key in plan.tickets
-            )
-            text += "\n\nVerification:\n" + (
-                "\n".join(f"{c.name}: {c.argv}" for c in plan.checks)
-                or "Manual verification required"
-            )
-            text += "\n\nDependent work waits for human acceptance of prerequisites. Reselect tickets to edit this plan; every material change invalidates approval."
-            self.query_one("#plan-text", Static).update(text)
-            self.query_one(TabbedContent).active = "planner"
-            self.call_after_refresh(self.query_one("#approve-plan", Button).focus)
-            self.update_views(force=True)
         except Exception as exc:
             self.notice(exc)
+            return
+        lines = [
+            f"{key}  ·  {preview.blocked.get(key) or self.engine.readiness(key)}\n  branch {preview.branches[key]}"
+            for key in preview.tickets
+        ]
+        step = (
+            "Gemini drafts a read-only implementation plan for each ready ticket and waits for your approval before editing code."
+            if self.engine.profile.gemini.plan_first
+            else "Gemini implements each ready ticket in its own worktree."
+        )
+        checks = [c.argv for c in preview.checks] or "manual verification"
+        actor = self.engine.profile.display_name
+
+        def start() -> None:
+            self.engine.start(keys, actor, preview)
+            self.run_workers()
+            self.query_one(TabbedContent).active = "agents"
+
+        self.confirm(
+            "Start these tickets?\n\n" + "\n".join(lines) + f"\n\n{step}\nChecks: {checks}",
+            start,
+        )
+
+    def load_plan(self, key: str | None = None) -> None:
+        key = (key or self.query_one("#plan-key", Input).value).strip().upper()
+        plan = self.engine.implementation_plan(key)
+        if plan is None:
+            raise OrchestratorError(f"{key} has no implementation plan yet")
+        self.query_one("#plan-key", Input).value = key
+        self.loaded_plan = (key, str(plan["fingerprint"]))
+        decision = plan["decision"]
+        status = (
+            f"Decision: {decision['decision']} by {decision['actor']}"
+            if decision
+            else "Awaiting your decision: approve, comment to refine, or reject."
+        )
+        ticket = self.engine.store.ticket(key)
+        self.query_one("#plan-text", Static).update(
+            f"{key} · {ticket.summary} · {self.engine.store.row(key)['state']}\n{status}\n\n{plan['text']}"
+        )
+        self.query_one(TabbedContent).active = "planner"
+
+    def decide(self, decision: str) -> None:
+        key = self.query_one("#plan-key", Input).value.strip().upper()
+        if self.loaded_plan is None or self.loaded_plan[0] != key:
+            raise OrchestratorError("Load and read this ticket's plan before deciding")
+        current = self.engine.implementation_plan(key)
+        if current is None or current["fingerprint"] != self.loaded_plan[1]:
+            raise OrchestratorError("The plan changed; load it again before deciding")
+        comment = self.query_one("#plan-comment", TextArea).text
+        fingerprint = self.loaded_plan[1]
+        actor = self.engine.profile.display_name
+
+        def apply() -> None:
+            if self.engine.decide_plan(key, decision, actor, fingerprint, comment):
+                self.run_workers()
+            self.query_one("#plan-comment", TextArea).clear()
+            self.loaded_plan = None
+
+        self.confirm(
+            {
+                "approve": f"Approve this plan and let Gemini implement {key} in its worktree?",
+                "comment": f"Send this comment and have Gemini revise the {key} plan?\n\n{comment}",
+                "reject": f"Reject this plan and stop {key}? Its worktree is preserved.",
+            }[decision],
+            apply,
+        )
 
     @work(exclusive=True, group="refresh")
     async def action_refresh(self) -> None:
@@ -413,7 +470,14 @@ class Dashboard(App[None]):
     async def run_workers(self) -> None:
         try:
             await self.engine.execute(connected_enabled=self.connected_enabled)
-            self.notice("Batch finished. Review implementations before launching dependent work.")
+            waiting = [
+                row["key"] for row in self.engine.store.rows() if row["state"] == State.PLAN_REVIEW
+            ]
+            self.notice(
+                f"Plans ready for review: {', '.join(waiting)}. Open Plans."
+                if waiting
+                else "Workers finished. Review implementations in Review."
+            )
         except Exception as exc:
             self.notice(exc)
         finally:
@@ -465,10 +529,16 @@ class Dashboard(App[None]):
         try:
             if button == "toggle":
                 self.action_toggle_ticket()
-            elif button == "save-selection":
-                self.action_save_selection()
-            elif button == "propose":
-                self.action_plan()
+            elif button == "start":
+                self.action_start()
+            elif button == "load-plan":
+                self.load_plan()
+            elif button == "approve-plan":
+                self.decide("approve")
+            elif button == "comment-plan":
+                self.decide("comment")
+            elif button == "reject-plan":
+                self.decide("reject")
             elif button == "agent-session":
                 self.load_session(
                     self.query_one("#agent-key", Input).value.strip().upper() or self.current_key
@@ -517,33 +587,6 @@ class Dashboard(App[None]):
                         "Low": 3,
                         "Lowest": 4,
                     }.get(str(value), 5),
-                )
-            elif button == "defer":
-                self.selected.discard(self.current_key)
-                self.action_save_selection()
-            elif button == "approve-plan":
-                plan = self.engine.store.plan()
-                self.confirm(
-                    f"Approve plan {plan.id}?\nFingerprint: {plan.fingerprint}\nThis records planning approval. Worker launch requires its own approval.",
-                    lambda: self.engine.approve_plan(actor),
-                )
-            elif button == "reject-plan":
-                self.confirm(
-                    "Reject the current plan and return its tickets to selection?",
-                    lambda: self.engine.select(sorted(self.selected), actor),
-                )
-            elif button == "launch":
-                plan = self.engine.store.plan()
-
-                def launch() -> None:
-                    self.engine.approve_launch(actor)
-                    self.run_workers()
-                    self.query_one(TabbedContent).active = "agents"
-                    self.call_after_refresh(self.query_one("#agent-key", Input).focus)
-
-                self.confirm(
-                    f"Launch queued workers for plan {plan.id}?\n{', '.join(key for group in plan.groups for key in group)}\nConcurrency: {self.engine.profile.gemini.concurrency}\nVerification commands: {[c.argv for c in plan.checks]}",
-                    launch,
                 )
             elif button == "load-review":
                 self.load_review()
@@ -635,7 +678,8 @@ class Dashboard(App[None]):
         store = self.engine.store
         rows = store.rows()
         signature = json.dumps([rows, store.approvals(), store.events(30)], default=str)
-        active = any(row["state"] in {State.IN_PROGRESS, State.VERIFYING} for row in rows)
+        busy = {State.PLANNING, State.IN_PROGRESS, State.VERIFYING}
+        active = any(row["state"] in busy for row in rows)
         if signature == self.last_view and not force and not active:
             return
         self.last_view = signature
@@ -649,11 +693,12 @@ class Dashboard(App[None]):
                 self.query_one("#session-code", Button).disabled = True
                 self.notice(exc)
         p = self.engine.profile
-        running = sum(row["state"] in {State.IN_PROGRESS, State.VERIFYING} for row in rows)
+        running = sum(row["state"] in busy for row in rows)
+        plans = [row["key"] for row in rows if row["state"] == State.PLAN_REVIEW]
         review = sum(row["state"] == State.READY_FOR_REVIEW for row in rows)
         blocked = sum(row["state"] == State.BLOCKED for row in rows)
         self.query_one("#overview", Static).update(
-            f"{p.display_name} · {p.mode.upper()} · Board {p.board_id or 'unconfigured'} · {p.sprint.name if p.sprint else 'No sprint'}\nSelected {len(self.selected)} / {len(rows)}    Running {running}/{p.gemini.concurrency}    Blocked {blocked}    Review {review}"
+            f"{p.display_name} · {p.mode.upper()} · Board {p.board_id or 'unconfigured'} · {p.sprint.name if p.sprint else 'No sprint'}\nSelected {len(self.selected)} / {len(rows)}    Running {running}/{p.gemini.concurrency}    Blocked {blocked}    Plans {len(plans)}    Review {review}"
         )
         agents = []
         for row in rows:
@@ -662,9 +707,7 @@ class Dashboard(App[None]):
                 log = Path(worker["log"]) if worker.get("log") else None
                 recent = ""
                 elapsed = ""
-                if row["state"] in {State.IN_PROGRESS, State.VERIFYING} and worker.get(
-                    "started_at"
-                ):
+                if row["state"] in busy and worker.get("started_at"):
                     seconds = max(
                         0,
                         int(
@@ -687,14 +730,22 @@ class Dashboard(App[None]):
                     f"{row['key']} · {row['state']} · PID {row['pid'] or '—'}{elapsed}\nBranch {row['branch'] or 'pending'}\nWorktree {row['worktree'] or 'pending'}\n{recent}"
                 )
         self.query_one("#agent-text", Static).update(
-            "\n\n".join(agents) or "No workers launched. Select work and approve a plan first."
+            "\n\n".join(agents) or "No workers launched. Select tickets and start them first."
         )
+        if self.loaded_plan is None:
+            self.query_one("#plan-text", Static).update(
+                "Plans awaiting your review (enter a key and Load plan):\n"
+                + (
+                    "\n".join(f"  {key} · {store.ticket(key).summary}" for key in plans)
+                    or "  None yet. Start tickets from the Tickets tab."
+                )
+            )
         self.query_one("#approval-text", Static).update(
             "\n\n".join(
                 f"#{a['id']} · {a['action']} · {a['subject']}\n{'Granted by ' + str(a['actor']) if a['granted'] else 'Awaiting explicit human action'}\nFingerprint {a['fingerprint']}"
                 for a in store.approvals()
             )
-            + "\n\nUse Plan for planning/launch approval; use Review for implementation acceptance. Push and draft-request approvals use the CLI."
+            + "\n\nUse Plans to approve Gemini's implementation plans and Review to accept code. Push and draft-request approvals use the CLI."
         )
         self.query_one("#activity-text", Static).update(
             "\n".join(

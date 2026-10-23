@@ -2,7 +2,7 @@
 
 The [report](report.json) records an actual synthetic walkthrough of the dashboard and the shared terminal application used by the generated VS Code task. No model account or company service was contacted.
 
-The walkthrough declined one message and preserved its draft, sent a confirmed dashboard follow-up, sent a second confirmed message through the editor-terminal application, observed that reply in the main dashboard, verified the same branch/worktree and passing checks, and reopened persistent state with all six conversation entries intact. Both views were exercised at 120×40 and 80×24.
+Both tickets went through the plan-first step (read-only plan, then human approval) before implementation. The walkthrough declined one message and preserved its draft, sent a confirmed dashboard follow-up, sent a second confirmed message through the editor-terminal application, observed that reply in the main dashboard, verified the same branch/worktree and passing checks, and reopened persistent state with all nine conversation entries intact (the plan request, plan and approval, the implementation turn, and both follow-ups with replies). Both views were exercised at 120×40 and 80×24.
 
 VS Code is not installed on this development machine. Its executable launch was stubbed; the generated workspace, process-task arguments and working directory were inspected. The actual conversation client that task runs was exercised through Textual. These captures show terminal UI, not an installed VS Code window. The native-session test separately runs a real sandboxed synthetic Gemini executable and asserts exact UUID resumption; real provider authentication/history compatibility remains target-system validation.
 

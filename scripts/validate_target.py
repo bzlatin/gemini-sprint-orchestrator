@@ -51,10 +51,22 @@ async def validate(output: Path, template: str | None, synthetic: bool) -> dict:
                 f"Isolated Gemini HOME: {home}. Use an approved model API key in the environment, or authenticate Gemini in this dedicated home before continuing. Do not copy your normal settings/extensions."
             )
         confirm(
-            "Approve one real Gemini coding turn and isolated verification in this disposable repository?",
+            "Approve one read-only Gemini planning turn in this disposable repository?",
             synthetic,
         )
         engine.approve_launch("Target validation operator")
+        await engine.execute(connected_enabled=not synthetic)
+        proposal = engine.implementation_plan("DEMO-1")
+        if engine.store.row("DEMO-1")["state"] != State.PLAN_REVIEW or proposal is None:
+            raise OrchestratorError("Read-only planning failed; inspect private runtime logs")
+        print(proposal["text"])
+        confirm(
+            "Approve this implementation plan: one Gemini coding turn and isolated verification?",
+            synthetic,
+        )
+        engine.decide_plan(
+            "DEMO-1", "approve", "Target validation operator", str(proposal["fingerprint"])
+        )
         await engine.execute(connected_enabled=not synthetic)
         row = engine.store.row("DEMO-1")
         if (
@@ -91,6 +103,7 @@ async def validate(output: Path, template: str | None, synthetic: bool) -> dict:
         await engine.ask("DEMO-1", question, connected_enabled=not synthetic)
         report = {
             "mode": "synthetic harness" if synthetic else "real Gemini / synthetic task",
+            "read_only_planning_and_approval": "passed",
             "initial_worker_and_checks": "passed",
             "same_branch_and_worktree": True,
             "native_uuid_resume": "synthetic mode; not tested" if synthetic else "passed",
