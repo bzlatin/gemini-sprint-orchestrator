@@ -18,9 +18,9 @@ Changing identity, repository, board or sprint starts a distinct state scope und
 
 ## Dashboard
 
-Tickets: type a key/summary search or priority/status filter. Space or **Toggle ticket** changes the pending selection. **Save selection** records human intent after confirmation. **Defer ticket** saves a selection without that ticket. The priority sort action sorts the table; selection and lifecycle persist across restarts.
+Tickets: type a key/summary search or priority/status filter. Space or **Toggle ticket** changes the pending selection. *Readiness* shows `Ready` or `Waiting on KEY` (a prerequisite not yet accepted). Optional branch names go in the branch field as `KEY=name, KEY=name`. **Start selected** (`s`) shows one confirmation with readiness, dependencies, conflicts, branch names and checks; confirming selects, schedules and authorizes exactly that preview. If anything changed while you read it, it is refused and you review again.
 
-Plan: inspect groups, worker slots, blockers, dependency reasons, branches, worktree paths and verification. Confirm plan approval, then separately confirm worker launch. Reselect tickets and propose another plan to edit; prior grants become invalid. Launching downstream work waits for human acceptance of prerequisite commits. After review, approve a fresh launch for blocked downstream work.
+Plans: tickets waiting for your decision are listed. Enter a key and **Load plan** to read Gemini's implementation plan. **Approve plan** lets Gemini implement exactly that plan; **Send comment** asks Gemini to revise it in the same session; **Reject plan** cancels the ticket and preserves its worktree. A decision is refused unless the loaded plan is still the current one. Dependent tickets start planning only after you accept their prerequisites.
 
 Agents: see actual lifecycle, PID, branch, worktree and recent worker output. Pause/cancel stops owned subprocess groups and preserves files. There is no fabricated progress percentage. The approval queue lists every outstanding gate. Activity records transitions and decisions.
 
@@ -28,11 +28,24 @@ Review: enter a ticket key and load its package. Inspect diff, file list, untrac
 
 Settings: edit concurrency, timeout and checks as structured JSON. Saving invalidates execution approvals. For identity, board, sprint, paths or hosting, close the dashboard and use `profile edit`. The CLI remains available for screen-reader workflows and very small terminals.
 
+## Implementation plans
+
+With `gemini.plan_first` (the default), every ticket's first Gemini turn is planning only. Gemini receives the full Jira ticket as untrusted data and must reply with its understanding, files to change, numbered steps, tests, risks and open questions. The turn uses read-only tools, the same isolated worker home as implementation, and an OS sandbox that denies worktree writes; any worktree change fails planning. CLI equivalents:
+
+```sh
+gemini-orchestrator plan APP-1                    # read the plan and its decision
+gemini-orchestrator plan APP-1 --comment "TEXT"   # Gemini revises the plan
+gemini-orchestrator plan APP-1 --approve          # Gemini implements the approved plan
+gemini-orchestrator plan APP-1 --reject [--comment REASON]
+```
+
+Approval is bound to the exact plan text, ticket data and worktree state. The implementation turn resumes the planning session when Gemini supports it and also receives the approved plan explicitly. Set `plan_first` to `false` in the profile to implement directly after starting.
+
 ## Worktrees and continuation
 
-Each approved ticket gets a `gso/KEY-PLAN` branch and an external worktree path. Main checkout must be clean when planning. Collisions fail without deleting or resetting anything. A single accepted prerequisite becomes the dependent worktree base. Multiple prerequisite commits must already form an ancestor chain; otherwise manually integrate on a human-controlled branch and replan. Protected branches are never worker targets.
+Each started ticket gets a branch from the profile's `branch_template` (default `{type}/{key}-{slug}`; fields `{key}`, `{slug}`, `{type}`, `{id}`) or the name you entered, plus an external worktree path. Invalid, duplicate, protected and existing branch names are refused before anything starts. Main checkout must be clean when planning. Collisions fail without deleting or resetting anything. A single accepted prerequisite becomes the dependent worktree base. Multiple prerequisite commits must already form an ancestor chain; otherwise manually integrate on a human-controlled branch and replan. Protected branches are never worker targets.
 
-After feedback, use `retry KEY`, inspect the new plan, approve it and run. Existing worktree, feedback and task context are retained. Native Gemini sessions are not required. Interrupted and failed work uses this same continuation path after inspection.
+After feedback, use `retry KEY` (or **Start selected**). The approved implementation plan, existing worktree, feedback and task context are retained, so Gemini continues implementing without re-planning. Native Gemini sessions are not required. Interrupted and failed work uses this same continuation path after inspection.
 
 ## Verification
 
@@ -61,14 +74,14 @@ Run `tmux new -s sprint`, activate the virtual environment and open the dashboar
 
 ## Semantic planning and manual dependency corrections
 
-On the approved connected system, `plan --semantic --enable-connected` asks Gemini for advisory recommendations using bounded README/GEMINI/manifest context, declared relevant source files, the tracked source tree and local branches. A deny-all tool policy prevents the analysis from invoking MCP, shell or edit tools. The model cannot mark its guesses confirmed or schedule work. Ticket references found by deterministic text matching are labeled unknown, not AI-inferred.
+On the approved connected system, `schedule --semantic --enable-connected` asks Gemini for advisory recommendations using bounded README/GEMINI/manifest context, declared relevant source files, the tracked source tree and local branches. A deny-all tool policy prevents the analysis from invoking MCP, shell or edit tools. The model cannot mark its guesses confirmed or schedule work. Ticket references found by deterministic text matching are labeled unknown, not AI-inferred.
 
 Inspect every inferred dependency. To promote/correct a relationship explicitly, use:
 
 ```sh
 gemini-orchestrator dependencies APP-12 --requires APP-11 --file src/example.py
 # Multiple --requires / --conflicts / --file options are supported.
-gemini-orchestrator plan --approve
+gemini-orchestrator work APP-11 APP-12
 ```
 
 This edits local planning metadata only; Jira is unchanged. It returns the previous queued plan to selection and revokes all previous plan/launch grants while retaining their audit records. Repeated discovery may replace manual context with current Jira data, so review the next plan.

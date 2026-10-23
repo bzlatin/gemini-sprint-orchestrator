@@ -26,6 +26,8 @@ class State(StrEnum):
     AWAITING_PLAN_APPROVAL = "AWAITING_PLAN_APPROVAL"
     QUEUED = "QUEUED"
     BLOCKED = "BLOCKED"
+    PLANNING = "PLANNING"
+    PLAN_REVIEW = "PLAN_REVIEW"
     IN_PROGRESS = "IN_PROGRESS"
     PAUSED = "PAUSED"
     INTERRUPTED = "INTERRUPTED"
@@ -51,12 +53,22 @@ TRANSITIONS: dict[State, set[State]] = {
     State.QUEUED: {
         State.NOT_SELECTED,
         State.SELECTED,
+        State.PLANNING,
         State.IN_PROGRESS,
         State.BLOCKED,
         State.CANCELLED,
         State.PAUSED,
     },
     State.BLOCKED: {State.NOT_SELECTED, State.QUEUED, State.SELECTED, State.CANCELLED},
+    # Planning is a read-only model turn; only a human decision leaves plan review.
+    State.PLANNING: {
+        State.PLAN_REVIEW,
+        State.FAILED,
+        State.CANCELLED,
+        State.INTERRUPTED,
+        State.PAUSED,
+    },
+    State.PLAN_REVIEW: {State.QUEUED, State.SELECTED, State.CANCELLED},
     State.IN_PROGRESS: {
         State.VERIFYING,
         State.FAILED,
@@ -172,12 +184,16 @@ class JiraSettings(BaseModel):
         return value
 
 
+BRANCH_FIELDS = {"key", "slug", "type", "id"}
+
+
 class GeminiSettings(BaseModel):
     executable: str = "gemini"
     concurrency: int = Field(default=2, ge=1, le=16)
     timeout: int = Field(default=1800, ge=1, le=86400)
     retries: int = Field(default=1, ge=0, le=3)
     behavior: str = "Implement only the assigned acceptance criteria. Explain changes and risks."
+    plan_first: bool = True
     use_instructions: bool = True
     reuse_skills: bool = False
 
@@ -213,12 +229,29 @@ class Profile(BaseModel):
     protected_branches: list[str] = Field(
         default_factory=lambda: ["main", "master", "develop", "production"]
     )
+    branch_template: str = "{type}/{key}-{slug}"
 
     @field_validator("name")
     @classmethod
     def safe_name(cls, value: str) -> str:
         if not re.fullmatch(r"[a-z][a-z0-9-]{0,47}", value):
             raise ValueError("Profile names must be lowercase letters, digits and hyphens")
+        return value
+
+    @field_validator("branch_template")
+    @classmethod
+    def known_branch_fields(cls, value: str) -> str:
+        from string import Formatter
+
+        try:
+            fields = {name for _, name, _, _ in Formatter().parse(value) if name is not None}
+        except ValueError as exc:
+            raise ValueError(f"Invalid branch template: {exc}") from exc
+        if not fields <= BRANCH_FIELDS or "key" not in fields:
+            raise ValueError(
+                "Branch templates must include {key} and may use only "
+                + ", ".join("{" + name + "}" for name in sorted(BRANCH_FIELDS))
+            )
         return value
 
     @model_validator(mode="after")

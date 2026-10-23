@@ -18,6 +18,8 @@ def profiles(tmp_path: Path) -> Profiles:
 @pytest.fixture
 def engine(profiles: Profiles) -> Iterator[Engine]:
     profile = create_demo(profiles)
+    # Most lifecycle tests exercise implementation directly; plan-first has dedicated tests.
+    profile.gemini.plan_first = False
     engine = Engine(profile, profiles.runtime(profile.name))
     yield engine
     engine.close()

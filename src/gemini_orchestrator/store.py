@@ -165,9 +165,13 @@ class Store:
         )
         return int(cursor.lastrowid or 0)
 
-    def grant(self, approval: int, actor: str) -> None:
+    @staticmethod
+    def require_human(actor: str) -> None:
         if not actor.strip() or actor.lower() in {"agent", "worker", "gemini", "system"}:
             raise OrchestratorError("A human identity is required")
+
+    def grant(self, approval: int, actor: str) -> None:
+        self.require_human(actor)
         cursor = self.db.execute(
             "UPDATE approvals SET granted=1,actor=? WHERE id=? AND consumed=0", (actor, approval)
         )

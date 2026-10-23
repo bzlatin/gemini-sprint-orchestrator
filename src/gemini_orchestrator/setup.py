@@ -259,7 +259,18 @@ def wizard(
         behavior=Prompt.ask("Preferred worker behavior", default=profile.gemini.behavior),
         use_instructions=Confirm.ask("Use existing GEMINI.md?", default=True),
         reuse_skills=False,
+        plan_first=profile.gemini.plan_first,
     )
+    while True:
+        template = Prompt.ask(
+            "Branch naming ({key} {slug} {type} {id}; you approve every name before work starts)",
+            default=profile.branch_template,
+        )
+        try:
+            profile.branch_template = Profile.known_branch_fields(template)
+            break
+        except ValueError as exc:
+            console.print(str(exc))
     console.print(
         "Custom skills/agents are detected by Gemini itself, but reuse is disabled until their permissions can be safely restricted."
     )
@@ -324,6 +335,7 @@ def wizard(
                 "jira",
                 "repository",
                 "gemini",
+                "branches",
                 "checks",
                 "hosting",
             ],
@@ -345,6 +357,10 @@ def wizard(
         elif field == "gemini":
             profile.gemini.concurrency = typer.prompt("Concurrency", default=2, type=int)
             profile.gemini.timeout = typer.prompt("Worker timeout", default=1800, type=int)
+        elif field == "branches":
+            profile.branch_template = Profile.known_branch_fields(
+                Prompt.ask("Branch naming", default=profile.branch_template)
+            )
         elif field == "checks":
             configure_checks(profile)
         elif field == "hosting":

@@ -50,6 +50,8 @@ def test_onboarding_offline_identity_not_assumed(profiles: Profiles) -> None:
             "Platform",
             "missing-gemini",
             "Focused implementation",
+            "{bad}/{key}",
+            "{key}-work",
             "later",
             "local",
             "save",
@@ -65,6 +67,7 @@ def test_onboarding_offline_identity_not_assumed(profiles: Profiles) -> None:
     ):
         profile = wizard(profiles, "personal")
     assert profile.display_name == "Alex"
+    assert profile.branch_template == "{key}-work"
     assert profile.identity.account_id == ""
     assert not profile.remote_writes
     assert profiles.active() == "personal"
@@ -122,29 +125,23 @@ async def test_dashboard_selection_plan_and_approval_gates(
         assert table.row_count == 6
         app.query_one("#sort-priority", Button).press()
         await pilot.pause()
-        assert table.get_row_at(0)[3].plain == "High"
+        assert table.get_row_at(0)[4].plain == "High"
         assert table.size.height >= 5  # at least three visible rows with header/scrollbar
         assert app.query_one("#details-scroll").can_focus
         await pilot.press("space")
         assert "DEMO-1" in app.selected
         assert table.get_row("DEMO-1")[0].plain == "[x]"
-        app.action_save_selection()
+        assert table.get_row("DEMO-3")[3].plain == "Waiting on DEMO-1"
+        app.query_one("#branch-overrides", Input).value = "DEMO-1=feature/accessible-help"
+        app.action_start()
         await pilot.pause()
         assert isinstance(app.screen, Confirmation)
-        await pilot.click("#confirm")
+        assert "feature/accessible-help" in app.screen.message
+        # Going back records nothing: no selection, schedule or launch approval.
+        await pilot.click("#back")
         await pilot.pause()
-        assert engine.store.row("DEMO-1")["state"] == State.SELECTED
-        app.action_plan()
-        await pilot.pause()
-        assert app.query_one(TabbedContent).active == "planner", str(
-            app.query_one("#notice", Static).render()
-        )
-        assert engine.store.row("DEMO-1")["state"] == State.AWAITING_PLAN_APPROVAL
-        await pilot.click("#approve-plan")
-        await pilot.pause()
-        await pilot.click("#confirm")
-        await pilot.pause()
-        assert engine.store.row("DEMO-1")["state"] == State.QUEUED
+        assert engine.store.row("DEMO-1")["state"] == State.NOT_SELECTED
+        assert not engine.store.approvals()
         assert not engine.supervisor.running
         await app.action_quit()
 
@@ -157,11 +154,8 @@ async def test_dashboard_search_and_full_execution(engine: Engine, profiles: Pro
         await pilot.pause()
         assert app.query_one("#tickets", DataTable).row_count == 1
         app.query_one("#search", Input).value = ""
-        engine.select(["DEMO-1", "DEMO-2"], "Alex")
-        app.action_plan()
-        engine.approve_plan("Alex")
-        await pilot.pause()
-        await pilot.click("#launch")
+        app.selected = {"DEMO-1", "DEMO-2"}
+        await pilot.click("#start")
         await pilot.pause()
         await pilot.click("#confirm")
         async with asyncio.timeout(20):
@@ -170,8 +164,7 @@ async def test_dashboard_search_and_full_execution(engine: Engine, profiles: Pro
                 for key in ("DEMO-1", "DEMO-2")
             ):
                 await pilot.pause(0.1)
-        assert engine.store.row("DEMO-1")["state"] == State.READY_FOR_REVIEW
-        assert engine.store.row("DEMO-2")["state"] == State.READY_FOR_REVIEW
+        assert engine.store.row("DEMO-1")["branch"] == "feature/DEMO-1-add-accessible-command-help"
         app.query_one(TabbedContent).active = "review"
         app.call_after_refresh(app.query_one("#review-key", Input).focus)
         await pilot.pause()
@@ -185,6 +178,57 @@ async def test_dashboard_search_and_full_execution(engine: Engine, profiles: Pro
         assert not isinstance(app.screen, Confirmation)
         assert "Load and inspect" in str(app.query_one("#notice", Static).render())
         await app.action_quit()
+
+
+async def test_dashboard_plan_review_comment_and_approve(
+    profiles: Profiles,
+) -> None:
+    profile = create_demo(profiles)
+    assert profile.gemini.plan_first
+    engine = Engine(profile, profiles.runtime(profile.name))
+    try:
+        await engine.discover()
+        app = Dashboard(engine, profiles)
+        async with app.run_test(size=(120, 40)) as pilot:
+            app.selected = {"DEMO-1"}
+            app.action_start()
+            await pilot.pause()
+            await pilot.click("#confirm")
+            async with asyncio.timeout(20):
+                while engine.store.row("DEMO-1")["state"] != State.PLAN_REVIEW:
+                    await pilot.pause(0.1)
+            assert not (Path(engine.store.row("DEMO-1")["worktree"]) / "src/help.py").exists()
+            await pilot.pause(0.6)
+            assert "DEMO-1" in str(app.query_one("#plan-text", Static).render())
+            # Deciding without reading the plan is refused.
+            app.query_one("#plan-key", Input).value = "DEMO-1"
+            app.query_one("#approve-plan", Button).press()
+            await pilot.pause()
+            assert not isinstance(app.screen, Confirmation)
+            app.load_plan("DEMO-1")
+            assert "Implementation plan for DEMO-1" in str(
+                app.query_one("#plan-text", Static).render()
+            )
+            app.query_one("#plan-comment").load_text("Mention keyboard shortcuts")
+            app.query_one("#comment-plan", Button).press()
+            await pilot.pause()
+            await pilot.click("#confirm")
+            async with asyncio.timeout(20):
+                while engine.store.row("DEMO-1")["state"] != State.PLAN_REVIEW or (
+                    "keyboard shortcuts" not in str(engine.implementation_plan("DEMO-1")["text"])
+                ):
+                    await pilot.pause(0.1)
+            app.load_plan("DEMO-1")
+            app.query_one("#approve-plan", Button).press()
+            await pilot.pause()
+            await pilot.click("#confirm")
+            async with asyncio.timeout(20):
+                while engine.store.row("DEMO-1")["state"] != State.READY_FOR_REVIEW:
+                    await pilot.pause(0.1)
+            assert (Path(engine.store.row("DEMO-1")["worktree"]) / "src/help.py").exists()
+            await app.action_quit()
+    finally:
+        engine.close()
 
 
 async def test_live_logs_refresh_without_a_lifecycle_change(
@@ -205,11 +249,8 @@ async def test_live_logs_refresh_without_a_lifecycle_change(
     app = Dashboard(engine, profiles)
     with patch.object(engine.supervisor, "run", side_effect=observed_worker):
         async with app.run_test(size=(120, 40)) as pilot:
-            engine.select(["DEMO-1"], "Alex")
-            app.action_plan()
-            engine.approve_plan("Alex")
-            await pilot.pause()
-            app.query_one("#launch", Button).press()
+            app.selected = {"DEMO-1"}
+            app.query_one("#start", Button).press()
             await pilot.pause()
             await pilot.click("#confirm")
             async with asyncio.timeout(10):

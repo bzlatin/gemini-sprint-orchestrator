@@ -163,9 +163,10 @@ def wrap(
     *,
     worker: bool = False,
     read_only: bool = False,
+    purpose: str | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     worktree = worktree.resolve()
-    purpose = "ask" if read_only else "worker" if worker else "verification"
+    purpose = purpose or ("ask" if read_only else "worker" if worker else "verification")
     home = scratch(runtime, key, purpose)
     env = environment(home, model=worker)
     reads = [Path(p) for p in SYSTEM_READS if Path(p).exists()]

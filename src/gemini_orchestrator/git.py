@@ -75,8 +75,8 @@ class Git:
         with self.mutation_lock():
             self.validate()
             command(["git", "check-ref-format", "--branch", branch])
-            if branch in profile.protected_branches or not branch.startswith("gso/"):
-                raise OrchestratorError("Worker branches must use gso/ and must not be protected")
+            if branch in profile.protected_branches:
+                raise OrchestratorError("Worker branches must not be protected")
             expected = profile.worktrees.resolve()
             if path.parent.resolve() != expected or path.is_symlink():
                 raise OrchestratorError("Worktree path escapes configured directory")

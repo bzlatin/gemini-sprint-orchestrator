@@ -4,7 +4,7 @@ import re
 import uuid
 from pathlib import Path
 
-from .git import Git
+from .git import Git, command
 from .models import Edge, OrchestratorError, Plan, Profile, Ticket, digest
 
 
@@ -30,7 +30,33 @@ def repository_context(repository: Path) -> dict[str, str]:
     return context
 
 
-def create_plan(profile: Profile, tickets: list[Ticket]) -> Plan:
+def branch_name(template: str, ticket: Ticket, plan_id: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", ticket.summary.lower()).strip("-")[:40].strip("-")
+    kind = "fix" if ticket.issue_type.casefold() in {"bug", "defect"} else "feature"
+    return template.format(key=ticket.key, slug=slug or "work", type=kind, id=plan_id[:6])
+
+
+def checked_branches(profile: Profile, branches: dict[str, str]) -> dict[str, str]:
+    for key, branch in branches.items():
+        try:
+            command(["git", "check-ref-format", "--branch", branch])
+        except OrchestratorError as exc:
+            raise OrchestratorError(f"{key} branch name is not valid in Git: {branch}") from exc
+        if branch in profile.protected_branches:
+            raise OrchestratorError(f"{key} cannot use protected branch {branch}")
+    if len(set(branches.values())) != len(branches):
+        raise OrchestratorError("Each ticket needs a distinct branch name")
+    return branches
+
+
+def create_plan(
+    profile: Profile,
+    tickets: list[Ticket],
+    *,
+    plan_id: str | None = None,
+    branches: dict[str, str] | None = None,
+    accepted: set[str] | None = None,
+) -> Plan:
     if not tickets:
         raise OrchestratorError("Select at least one ticket")
     git = Git(profile.repository)
@@ -46,7 +72,8 @@ def create_plan(profile: Profile, tickets: list[Ticket]) -> Plan:
     conflicts: set[frozenset[str]] = set()
     for ticket in tickets:
         dependencies[ticket.key] = set(ticket.dependencies) & selected.keys()
-        missing = set(ticket.dependencies) - selected.keys()
+        # Prerequisites a human already accepted locally no longer block this ticket.
+        missing = set(ticket.dependencies) - selected.keys() - (accepted or set())
         if missing:
             blocked[ticket.key] = "Prerequisite outside selection: " + ", ".join(sorted(missing))
         for dep in ticket.dependencies:
@@ -119,8 +146,17 @@ def create_plan(profile: Profile, tickets: list[Ticket]) -> Plan:
                 and not (profile.repository / relative).is_symlink()
             ):
                 context[f"source:{relative}"] = candidate.read_text(errors="replace")[:16000]
-    plan_id = uuid.uuid4().hex[:12]
-    branches = {key: f"gso/{key.lower()}-{plan_id[:6]}" for key in selected}
+    plan_id = plan_id or uuid.uuid4().hex[:12]
+    overrides = branches or {}
+    if not overrides.keys() <= selected.keys():
+        raise OrchestratorError("Branch names can only be set for selected tickets")
+    names = checked_branches(
+        profile,
+        {
+            key: overrides.get(key) or branch_name(profile.branch_template, ticket, plan_id)
+            for key, ticket in selected.items()
+        },
+    )
     return Plan(
         id=plan_id,
         base=base,
@@ -129,7 +165,7 @@ def create_plan(profile: Profile, tickets: list[Ticket]) -> Plan:
         groups=groups,
         blocked=blocked,
         edges=edges,
-        branches=branches,
+        branches=names,
         worktrees={
             key: str(profile.worktrees / f"{key.lower()}-{plan_id[:6]}") for key in selected
         },
