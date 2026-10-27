@@ -49,6 +49,14 @@ def checked_branches(profile: Profile, branches: dict[str, str]) -> dict[str, st
     return branches
 
 
+def mentioned_tickets(ticket: Ticket) -> list[str]:
+    """Ticket keys named in acceptance criteria that are not declared dependencies."""
+    found = re.findall(r"\b[A-Z][A-Z0-9_]*-\d+\b", " ".join(ticket.acceptance))
+    return [
+        key for key in dict.fromkeys(found) if key != ticket.key and key not in ticket.dependencies
+    ]
+
+
 def create_plan(
     profile: Profile,
     tickets: list[Ticket],
@@ -85,16 +93,15 @@ def create_plan(
                 )
             )
         # Textual recommendations remain advisory and never change the dependency DAG.
-        for dep in re.findall(r"\b[A-Z][A-Z0-9_]*-\d+\b", " ".join(ticket.acceptance)):
-            if dep != ticket.key and dep not in ticket.dependencies:
-                edges.append(
-                    Edge(
-                        prerequisite=dep,
-                        dependent=ticket.key,
-                        kind="unknown",
-                        reason="Acceptance criteria mention this ticket; confirm before changing dependencies",
-                    )
+        for dep in mentioned_tickets(ticket):
+            edges.append(
+                Edge(
+                    prerequisite=dep,
+                    dependent=ticket.key,
+                    kind="unknown",
+                    reason="Acceptance criteria mention this ticket; confirm before changing dependencies",
                 )
+            )
         for other in tickets:
             overlap = set(ticket.files) & set(other.files)
             if ticket.key < other.key and (

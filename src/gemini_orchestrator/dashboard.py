@@ -34,6 +34,14 @@ from .session_widgets import SessionPanel, confirmation_text
 from .sessions import SessionBridge, open_vscode
 
 
+def readiness_text(readiness: str, advisories: list[str]) -> Text:
+    """Color a readiness label; the words alone still carry the state."""
+    text = Text(readiness, style="green" if readiness == "Ready" else "dim red")
+    if advisories:
+        text.append(" · check " + ", ".join(advisories), style="yellow")
+    return text
+
+
 class Confirmation(ModalScreen[bool]):
     CSS = """
     Confirmation { align: center middle; background: $background 75%; }
@@ -314,21 +322,24 @@ class Dashboard(App[None]):
                 or status not in ticket.status.casefold()
             ):
                 continue
-            table.add_row(
-                *(
-                    Text(value)
-                    for value in [
-                        "[x]" if ticket.key in self.selected else "[ ]",
-                        ticket.key,
-                        row["state"],
-                        self.engine.readiness(ticket.key),
-                        ticket.priority,
-                        ticket.summary,
-                        ticket.status,
-                    ]
+            cells = [
+                Text(value)
+                for value in [
+                    "[x]" if ticket.key in self.selected else "[ ]",
+                    ticket.key,
+                    row["state"],
+                    ticket.priority,
+                    ticket.summary,
+                    ticket.status,
+                ]
+            ]
+            cells.insert(
+                3,
+                readiness_text(
+                    self.engine.readiness(ticket.key), self.engine.advisories(ticket.key)
                 ),
-                key=ticket.key,
             )
+            table.add_row(*cells, key=ticket.key)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id in {"search", "priority", "status-filter"}:

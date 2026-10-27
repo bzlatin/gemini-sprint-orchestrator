@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 from gemini_orchestrator.cli import app
 from gemini_orchestrator.config import Profiles
-from gemini_orchestrator.dashboard import Confirmation, Dashboard
+from gemini_orchestrator.dashboard import Confirmation, Dashboard, readiness_text
 from gemini_orchestrator.demo import create_demo
 from gemini_orchestrator.engine import Engine
 from gemini_orchestrator.models import OrchestratorError, State
@@ -156,6 +156,8 @@ async def test_dashboard_selection_plan_and_approval_gates(
         assert table.get_row("DEMO-1")[0].plain == "[x]"
         assert "Selected 1 / 6" in str(app.query_one("#overview", Static).render())
         assert table.get_row("DEMO-3")[3].plain == "Waiting on DEMO-1"
+        assert table.get_row("DEMO-3")[3].style == "dim red"
+        assert table.get_row("DEMO-1")[3].style == "green"
         app.query_one("#branch-overrides", Input).value = "DEMO-1=feature/accessible-help"
         app.action_start()
         await pilot.pause()
@@ -374,3 +376,11 @@ async def test_missing_discovery_defaults_to_manual_ids(engine: Engine) -> None:
     assert engine.profile.sprint.id == "101"
     assert engine.profile.sprint.board_id == "42"
     assert engine.profile.sprint_behavior == "manual"
+
+
+def test_readiness_colors_keep_the_words() -> None:
+    assert readiness_text("Ready", []).style == "green"
+    assert readiness_text("Waiting on APP-1", []).style == "dim red"
+    advisory = readiness_text("Ready", ["APP-2", "APP-3"])
+    assert advisory.plain == "Ready · check APP-2, APP-3"
+    assert [span.style for span in advisory.spans] == ["yellow"]

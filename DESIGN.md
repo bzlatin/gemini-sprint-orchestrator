@@ -66,6 +66,10 @@ The palette is cool and restrained, with a mint accent for identity and input fo
 - **Muted:** profile, sprint and operational counts in the overview; session status and the unfocused conversation composer border/title.
 - **Divider:** the horizontal boundary above ticket details.
 
+### Readiness
+
+- The Readiness label uses the terminal's own green (`Ready`) and dim red (`Waiting on KEY`, blocked reasons), plus a yellow `· check KEY` suffix for acceptance criteria that mention an unconfirmed ticket. These are the only state colors in the ticket table, and the label text still names the state in full.
+
 **The Text Carries State Rule.** Selection, lifecycle, approvals and errors must remain understandable without color. Preserve full state labels and explicit messages.
 
 ## Typography
