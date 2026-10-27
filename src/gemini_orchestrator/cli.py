@@ -16,7 +16,7 @@ from rich.prompt import Confirm
 from rich.table import Table
 
 from .config import Profiles
-from .dashboard import Dashboard
+from .dashboard import Dashboard, readiness_text
 from .demo import create_demo
 from .engine import Engine, profile_scope
 from .hosting import perform_draft, perform_push, remote_fingerprint, remote_preview
@@ -143,7 +143,7 @@ def show_schedule(engine: Engine, plan: Plan) -> None:
     for key in plan.tickets:
         table.add_row(
             key,
-            plan.blocked.get(key) or engine.readiness(key),
+            readiness_text(plan.blocked.get(key) or engine.readiness(key), engine.advisories(key)),
             plan.branches[key],
             plan.worktrees[key],
         )
@@ -349,7 +349,7 @@ def tickets(
         for ticket in tickets:
             table.add_row(
                 ticket.key,
-                engine.readiness(ticket.key),
+                readiness_text(engine.readiness(ticket.key), engine.advisories(ticket.key)),
                 engine.store.row(ticket.key)["state"],
                 ticket.priority,
                 printable(ticket.summary),

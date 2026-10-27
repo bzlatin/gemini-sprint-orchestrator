@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Readiness is color-coded in the dashboard, `tickets` and `schedule`: green for `Ready`, dim red for `Waiting on KEY` or a blocked reason, and a yellow `· check KEY` note when acceptance criteria mention a ticket that is not a confirmed dependency. The words are unchanged, so state still reads without color.
+
 ## 0.5.1 — connect once
 
 - Connected profiles can be allowed once, during setup or with `profile connected --enable`, to contact Jira and Gemini from this machine; commands then need no `--enable-connected`. The flag still works per command, `profile connected --disable` turns consent off, and demo profiles can never be allowed.

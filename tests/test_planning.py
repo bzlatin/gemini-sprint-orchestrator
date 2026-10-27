@@ -18,7 +18,7 @@ from gemini_orchestrator.engine import Engine
 from gemini_orchestrator.git import Git
 from gemini_orchestrator.isolation import scratch
 from gemini_orchestrator.models import OrchestratorError, Profile, State, Ticket
-from gemini_orchestrator.planning import branch_name
+from gemini_orchestrator.planning import branch_name, mentioned_tickets
 
 runner = CliRunner()
 
@@ -337,3 +337,15 @@ def test_setup_records_connected_access_once(profiles: Profiles) -> None:
     ):
         profile = wizard(profiles, "consented")
     assert profile.connected_access and profiles.load("consented").connected_access
+
+
+def test_acceptance_mentions_are_advisory_only() -> None:
+    ticket = Ticket(
+        key="APP-4",
+        summary="Use the new API",
+        assignee="a",
+        sprint_id="1",
+        acceptance=["Calls APP-2 and APP-3 endpoints", "Matches APP-2 schema; see APP-4"],
+        dependencies=["APP-3"],
+    )
+    assert mentioned_tickets(ticket) == ["APP-2"]

@@ -27,7 +27,7 @@ from .models import (
     Ticket,
     digest,
 )
-from .planning import create_plan
+from .planning import create_plan, mentioned_tickets
 from .process import Supervisor
 from .store import Store
 
@@ -301,6 +301,10 @@ class Engine:
             if known.get(dep) not in {State.APPROVED, State.MR_READY}
         ]
         return "Ready" if not waiting else "Waiting on " + ", ".join(waiting)
+
+    def advisories(self, key: str) -> list[str]:
+        """Tickets the acceptance criteria mention without a confirmed dependency."""
+        return mentioned_tickets(self.store.ticket(key))
 
     async def propose_semantic(self, *, connected_enabled: bool = False) -> Plan:
         if self.profile.mode != "connected" or not connected_enabled:
